@@ -1,0 +1,24 @@
+{
+  "name": "@titler/remotion",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/Root.tsx",
+  "scripts": {
+    "studio": "remotion studio src/Root.tsx",
+    "build": "remotion render src/Root.tsx TitlerVideo out/remotion-preview.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.360",
+    "@remotion/player": "^4.0.360",
+    "@remotion/renderer": "^4.0.360",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.360"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.6.3"
+  }
+}

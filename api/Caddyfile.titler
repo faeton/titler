@@ -1,0 +1,59 @@
+# titler-api — phase 1 site block
+# Appended to /etc/caddy/Caddyfile
+#
+# In front of this: Cloudflare orange-cloud proxy (DNS CNAME
+# api.titler.org → on1.onova.me, proxied).
+#
+# HTTP-01 cert issuance works through the CF proxy: LE connects to
+# api.titler.org:80, CF forwards to on1:80, Caddy answers, cert issues.
+# If CF is in Full (strict) mode, the cert from LE is trusted end-to-end.
+
+api.titler.org {
+    encode zstd gzip
+
+    # Global security headers (no secrets, safe to expose)
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options    "nosniff"
+        X-Frame-Options           "DENY"
+        Referrer-Policy           "no-referrer"
+        Permissions-Policy        "interest-cohort=()"
+        # Hide caddy version
+        -Server
+    }
+
+    # Reasonable upload ceiling (Phase 1)
+    request_body {
+        max_size 100MB
+    }
+
+    # 404 bot-path honeypots without hitting the node server
+    @bot_paths path /.env /.git* /wp-* /xmlrpc.php /phpmyadmin* /admin /.well-known/security.txt
+    handle @bot_paths {
+        respond 404
+    }
+
+    # Everything else → node
+    reverse_proxy 127.0.0.1:7000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        # Preserve CF headers the node server uses for logging
+        header_up CF-Connecting-IP {header.CF-Connecting-IP}
+        header_up CF-Ray {header.CF-Ray}
+    }
+
+    log {
+        output file /var/log/caddy/titler-api.log {
+            roll_size 20MB
+            roll_keep 5
+        }
+        format json
+    }
+}
+
+# Catch-all: any request hitting on1's IP or an unknown vhost on 80/443
+# gets a bare 404 — no info leakage about what's running here.
+:80, :443 {
+    respond 404
+}

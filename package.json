@@ -1,0 +1,16 @@
+{
+  "name": "titler",
+  "version": "0.2.0",
+  "private": true,
+  "packageManager": "pnpm@10.29.3",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "studio": "pnpm --filter @titler/studio run dev",
+    "server": "pnpm --filter @titler/server run dev",
+    "remotion": "pnpm --filter @titler/remotion run studio"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

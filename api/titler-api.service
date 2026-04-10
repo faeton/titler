@@ -1,0 +1,42 @@
+[Unit]
+Description=titler api (phase 1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=titler
+Group=titler
+WorkingDirectory=/opt/titler/api
+EnvironmentFile=/etc/titler/env
+ExecStart=/usr/bin/node /opt/titler/api/server.js
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=titler-api
+
+# hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+# MemoryDenyWriteExecute not set — V8 JIT needs RWX pages
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/titler /tmp
+
+[Install]
+WantedBy=multi-user.target
