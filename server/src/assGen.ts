@@ -134,6 +134,13 @@ const hexToAss = (hex: string, alpha = 0): string => {
 
 const REELS_SAFE = { x: 30, y: 250, w: 1020, h: 1220 };
 
+// Unified caption Y position. For IG Reels the lower third works best.
+// Circle (telegram) videos need captions well below the circle.
+const captionPos = (circle?: CircleLayout | null) => ({
+  x: 540, // center of 1080
+  y: circle ? 1420 : 1380, // lower third
+});
+
 // --- ASS generation per style ---
 
 type StyleName = "bold" | "clean" | "focus";
@@ -186,9 +193,7 @@ function generateBoldAss(
   const outlineSize = 4;
   const shadowDepth = 2;
 
-  // Y position for captions — lower third
-  const captionY = circle ? 1400 : 1350;
-  const captionX = 540; // center of 1080
+  const { x: captionX, y: captionY } = captionPos(circle);
 
   const header = assHeader({
     fontSize,
@@ -248,37 +253,33 @@ function generateCleanAss(
   chunks: Chunk[],
   circle?: CircleLayout | null,
 ): string {
-  const fontSize = 52;
+  const fontSize = 48;
   const font = "Arial";
-
-  const captionY = circle
-    ? circle.y + circle.size + 40 + 70
-    : REELS_SAFE.y + REELS_SAFE.h - 70;
+  const { x: cx, y: cy } = captionPos(circle);
 
   const header = assHeader({
     fontSize,
     font,
     primaryColor: hexToAss("#FFFFFF"),
-    // Use outline as the "pill" background: thick opaque border
     outlineColor: hexToAss("#000000", 48),
     shadowColor: hexToAss("#000000", 220),
-    outline: 28, // thick outline = pill effect
+    outline: 24,
     shadow: 0,
     bold: 0,
     alignment: 5,
-    marginV: 1920 - captionY,
-    borderStyle: 3, // opaque box mode
+    marginV: 10,
+    borderStyle: 3, // opaque box mode = dark pill
   });
 
   const events: string[] = [];
-  const fadeDur = 250; // ms
+  const fadeDur = 200; // ms
 
   for (let ci = 0; ci < chunks.length; ci++) {
     const chunk = chunks[ci];
     const nextStart = ci < chunks.length - 1 ? chunks[ci + 1].start : Infinity;
     const start = Math.max(0, chunk.start - 0.05);
     const end = Math.min(chunk.end + 0.1, nextStart - 0.01);
-    const text = `{\\fad(${fadeDur},${fadeDur})}${chunk.text}`;
+    const text = `{\\pos(${cx},${cy})\\fad(${fadeDur},${fadeDur})}${chunk.text}`;
     events.push(
       `Dialogue: 0,${fmtTime(start)},${fmtTime(end)},Default,,0,0,0,,${text}`,
     );
@@ -297,23 +298,20 @@ function generateFocusAss(
 ): string {
   const fontSize = 64;
   const font = "Arial";
-  const outlineSize = 6;
-
-  const captionY = circle
-    ? circle.y + circle.size + 30 + 150
-    : REELS_SAFE.y + REELS_SAFE.h - 150;
+  const outlineSize = 4;
+  const { x: cx, y: cy } = captionPos(circle);
 
   const header = assHeader({
     fontSize,
     font,
-    primaryColor: hexToAss("#FFFFFF", 160), // dim by default
-    outlineColor: hexToAss("#000000", 50),
-    shadowColor: hexToAss("#000000", 120),
+    primaryColor: hexToAss("#FFFFFF", 160),
+    outlineColor: hexToAss("#000000", 40),
+    shadowColor: hexToAss("#000000", 100),
     outline: outlineSize,
-    shadow: 3,
+    shadow: 2,
     bold: 1,
     alignment: 5,
-    marginV: 1920 - captionY,
+    marginV: 10,
   });
 
   const events: string[] = [];
@@ -330,7 +328,7 @@ function generateFocusAss(
       const wEnd =
         wi < chunk.words.length - 1 ? chunk.words[wi + 1].start : end;
 
-      let text = "{\\fad(100,100)}";
+      let text = `{\\pos(${cx},${cy})\\fad(80,80)}`;
       for (let j = 0; j < chunk.words.length; j++) {
         if (j === wi) {
           // Active word: yellow, full opacity, slightly bigger

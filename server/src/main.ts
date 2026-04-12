@@ -58,6 +58,27 @@ await app.register(fastifyStatic, {
   decorateReply: true,
 });
 
+// Serve rendered outputs from out/
+await app.register(fastifyStatic, {
+  root: OUT_DIR,
+  prefix: "/out/",
+  decorateReply: false,
+});
+
+// List rendered files
+app.get("/outputs", async () => {
+  const { readdirSync, statSync } = await import("node:fs");
+  if (!existsSync(OUT_DIR)) return { files: [] };
+  const files = readdirSync(OUT_DIR)
+    .filter((f) => f.endsWith(".mp4"))
+    .map((f) => {
+      const st = statSync(resolve(OUT_DIR, f));
+      return { name: f, size: st.size, mtime: st.mtime.toISOString() };
+    })
+    .sort((a, b) => b.mtime.localeCompare(a.mtime));
+  return { files };
+});
+
 // ----- read routes -----
 
 app.get("/health", async () => ({ ok: true }));
@@ -90,6 +111,32 @@ app.get<{ Params: { id: string } }>(
     if (!p.transcript)
       return reply.code(404).send({ error: "not_transcribed" });
     return p.transcript;
+  },
+);
+
+// ----- screenshot -----
+
+app.get<{ Params: { id: string }; Querystring: { time?: string } }>(
+  "/projects/:id/screenshot",
+  async (req, reply) => {
+    const project = getProject(req.params.id);
+    if (!project?.source)
+      return reply.code(404).send({ error: "not_ingested" });
+
+    const time = Number(req.query.time ?? 0);
+    const sourcePath = resolve(projectDir(project.id), "source.mp4");
+    const outPath = resolve(projectDir(project.id), `frame_${Math.round(time * 100)}.jpg`);
+
+    const { execSync } = await import("node:child_process");
+    try {
+      execSync(
+        `ffmpeg -y -ss ${time.toFixed(3)} -i "${sourcePath}" -frames:v 1 -q:v 2 "${outPath}"`,
+        { stdio: "pipe" },
+      );
+      return reply.sendFile(`frame_${Math.round(time * 100)}.jpg`, projectDir(project.id));
+    } catch (e) {
+      return reply.code(500).send({ error: "screenshot_failed" });
+    }
   },
 );
 

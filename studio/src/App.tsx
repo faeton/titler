@@ -74,6 +74,7 @@ export const App = () => {
   const [showArchived, setShowArchived] = useState(false);
   const [watermark, setWatermark] = useState(true);
   const [presets, setPresets] = useState<Preset[]>([]);
+  const [lastRenderFile, setLastRenderFile] = useState<string | null>(null);
   const playerRef = useRef<PlayerRef>(null);
 
   // Jobs
@@ -227,14 +228,25 @@ export const App = () => {
     setRendering(true);
     pushLog(`rendering ${current.name} with style=${captionStyle}...`);
     try {
+      let outputPath = "";
       await runStream(
         `/projects/${current.id}/render?style=${captionStyle}&watermark=${watermark}`,
         (ev) => {
+          const d = ev as Record<string, unknown>;
+          if (d.phase === "done" && typeof d.outputPath === "string") {
+            outputPath = d.outputPath;
+          }
           const s = JSON.stringify(ev);
           pushLog(`  render: ${s.length > 120 ? s.slice(0, 120) + "\u2026" : s}`);
         },
       );
-      pushLog(`render complete!`);
+      if (outputPath) {
+        const fileName = outputPath.split("/").pop() ?? "";
+        setLastRenderFile(fileName);
+        pushLog(`render complete: ${fileName}`);
+      } else {
+        pushLog(`render complete!`);
+      }
     } catch (e) {
       pushLog(`render error: ${(e as Error).message}`);
     } finally {
@@ -944,6 +956,21 @@ export const App = () => {
               >
                 {rendering ? "rendering..." : "render MP4"}
               </button>
+
+              {lastRenderFile && !rendering && (
+                <a
+                  href={`/api/out/${encodeURIComponent(lastRenderFile)}`}
+                  download
+                  style={{
+                    fontSize: 11,
+                    color: "#4ade80",
+                    textDecoration: "underline",
+                    padding: "4px 8px",
+                  }}
+                >
+                  download
+                </a>
+              )}
             </>
           )}
 
