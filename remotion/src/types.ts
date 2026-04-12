@@ -61,6 +61,7 @@ export type CompositionProps = {
   durationInSeconds: number;
   circle?: CircleLayout | null;
   style?: CaptionStyle;
+  showSafeZone?: boolean;
 };
 
 // IG Reels safe zone inside the 1080x1920 frame. See PLAN §"Target

@@ -140,6 +140,30 @@ app.get<{ Params: { id: string }; Querystring: { time?: string } }>(
   },
 );
 
+// ----- overlays -----
+
+app.get<{ Params: { id: string } }>(
+  "/projects/:id/overlays",
+  async (req, reply) => {
+    const p = getProject(req.params.id);
+    if (!p) return reply.code(404).send({ error: "not_found" });
+    return { overlays: p.overlays ?? [] };
+  },
+);
+
+app.put<{ Params: { id: string }; Body: { overlays: unknown } }>(
+  "/projects/:id/overlays",
+  async (req, reply) => {
+    const p = getProject(req.params.id);
+    if (!p) return reply.code(404).send({ error: "not_found" });
+    const { overlays } = req.body ?? {};
+    if (!Array.isArray(overlays))
+      return reply.code(400).send({ error: "overlays_array_required" });
+    updateProject(p.id, { overlays });
+    return { ok: true, count: overlays.length };
+  },
+);
+
 // ----- PATCH transcript (edit words) -----
 
 app.patch<{ Params: { id: string }; Body: { words: unknown } }>(

@@ -61,6 +61,19 @@ export type FaceTrackResult = {
   crop_height: number;
 };
 
+export type TextOverlay = {
+  id: string;
+  text: string;
+  x: number; // 0-1080
+  y: number; // 0-1920
+  start: number; // seconds
+  end: number; // seconds
+  fontSize: number;
+  color: string; // hex
+  fontWeight: number;
+  outline: boolean;
+};
+
 export type Project = {
   id: string;
   name: string;
@@ -72,8 +85,9 @@ export type Project = {
   cropMode?: CropMode;
   faceTrack?: FaceTrackResult;
   // Status tracking
-  edited?: boolean; // true if transcript was manually edited
-  rendered?: string[]; // list of style names that have been rendered
+  overlays?: TextOverlay[];
+  edited?: boolean;
+  rendered?: string[];
   archived?: boolean;
 };
 

@@ -44,6 +44,19 @@ export type SourceInfo = {
 
 export type CropMode = "center" | "face_track";
 
+export type TextOverlay = {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  start: number;
+  end: number;
+  fontSize: number;
+  color: string;
+  fontWeight: number;
+  outline: boolean;
+};
+
 export type FaceTrackResult = {
   found: boolean;
   keyframes: { time: number; x: number; y: number }[];
@@ -62,6 +75,7 @@ export type Project = {
   transcript?: Transcript;
   cropMode?: CropMode;
   faceTrack?: FaceTrackResult;
+  overlays?: TextOverlay[];
   edited?: boolean;
   rendered?: string[];
   archived?: boolean;
@@ -102,6 +116,12 @@ export const renameProject = (id: string, name: string) =>
   api<{ ok: boolean; name: string }>(`/projects/${id}/name`, {
     method: "PATCH",
     body: JSON.stringify({ name }),
+  });
+
+export const saveOverlays = (id: string, overlays: TextOverlay[]) =>
+  api<{ ok: boolean }>(`/projects/${id}/overlays`, {
+    method: "PUT",
+    body: JSON.stringify({ overlays }),
   });
 
 export const archiveProject = (id: string) =>

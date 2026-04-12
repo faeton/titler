@@ -38,7 +38,7 @@ export const renderProjectFfmpeg = async (
     project.transcript,
     style as "bold" | "clean" | "focus",
     project.source.circle,
-    { watermark: opts?.watermark !== false },
+    { watermark: opts?.watermark !== false, overlays: project.overlays },
   );
   writeFileSync(assPath, assContent);
   onProgress({ phase: "bundling", percent: 100 });

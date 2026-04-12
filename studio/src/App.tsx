@@ -32,12 +32,14 @@ import {
   listPresetsApi,
   createPreset,
   deletePresetApi,
+  saveOverlays,
   type Project,
   type CropMode,
   type Job,
   type Preset,
 } from "./api";
 import { TranscriptEditor } from "./components/TranscriptEditor";
+import { OverlayEditor } from "./components/OverlayEditor";
 
 // --- error boundary ---
 class ErrorBoundary extends Component<
@@ -73,6 +75,7 @@ export const App = () => {
   const [rendering, setRendering] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [watermark, setWatermark] = useState(true);
+  const [showSafeZone, setShowSafeZone] = useState(false);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [lastRenderFile, setLastRenderFile] = useState<string | null>(null);
   const playerRef = useRef<PlayerRef>(null);
@@ -270,6 +273,21 @@ export const App = () => {
         });
       } catch (e) {
         pushLog(`save error: ${(e as Error).message}`);
+      }
+    },
+    [current],
+  );
+
+  // --- overlays ---
+
+  const onOverlaysChange = useCallback(
+    async (overlays: import("./api").TextOverlay[]) => {
+      if (!current) return;
+      setCurrent({ ...current, overlays });
+      try {
+        await saveOverlays(current.id, overlays);
+      } catch (e) {
+        pushLog(`overlay save error: ${(e as Error).message}`);
       }
     },
     [current],
@@ -474,8 +492,9 @@ export const App = () => {
       durationInSeconds: duration,
       circle: current?.source?.circle ?? null,
       style: captionStyle,
+      showSafeZone,
     };
-  }, [current, captionStyle]);
+  }, [current, captionStyle, showSafeZone]);
 
   const durationInFrames = Math.max(
     1,
@@ -945,6 +964,24 @@ export const App = () => {
                 watermark
               </label>
 
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  fontSize: 11,
+                  color: "#888",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={showSafeZone}
+                  onChange={() => setShowSafeZone(!showSafeZone)}
+                  style={{ accentColor: "#888" }}
+                />
+                safe zone
+              </label>
+
               <button
                 onClick={onRender}
                 disabled={rendering || busy}
@@ -1096,6 +1133,21 @@ export const App = () => {
                   onEdit={onEditWord}
                 />
               </>
+            )}
+
+            {current?.source && (
+              <div style={{ marginTop: 12 }}>
+                <OverlayEditor
+                  overlays={current.overlays ?? []}
+                  currentTime={currentTime}
+                  duration={
+                    current.source?.original.duration ??
+                    current.transcript?.duration ??
+                    10
+                  }
+                  onChange={onOverlaysChange}
+                />
+              </div>
             )}
 
             {logs.length > 0 && (

@@ -11,6 +11,7 @@ export const TitlerVideo: React.FC<CompositionProps> = ({
   transcript,
   circle,
   style = "bold",
+  showSafeZone = false,
 }) => {
   const chunks = transcript ? chunkWords(transcript.words) : [];
 
@@ -38,7 +39,7 @@ export const TitlerVideo: React.FC<CompositionProps> = ({
       {chunks.length > 0 && (
         <CaptionComponent chunks={chunks} circle={circle} />
       )}
-      <ReelsSafeZoneMock visible={false} />
+      <ReelsSafeZoneMock visible={showSafeZone} />
     </AbsoluteFill>
   );
 };

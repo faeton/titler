@@ -8,7 +8,7 @@
  * ASS time format: H:MM:SS.CC (centiseconds)
  */
 
-import type { Transcript, CircleLayout } from "./types.js";
+import type { Transcript, CircleLayout, TextOverlay } from "./types.js";
 
 // Re-use the same chunking logic as Remotion compositions
 type Word = { start: number; end: number; text: string; prob?: number };
@@ -149,7 +149,7 @@ export function generateAss(
   transcript: Transcript,
   style: StyleName,
   circle?: CircleLayout | null,
-  opts?: { watermark?: boolean },
+  opts?: { watermark?: boolean; overlays?: TextOverlay[] },
 ): string {
   const chunks = chunkWords(transcript.words);
 
@@ -168,12 +168,21 @@ export function generateAss(
       ass = generateBoldAss(chunks, circle);
   }
 
+  // Append manual text overlays
+  const overlays = opts?.overlays ?? [];
+  for (const ov of overlays) {
+    const ovColor = hexToAss(ov.color || "#FFFFFF");
+    const ovOutline = ov.outline ? `\\bord4\\3c${hexToAss("#000000")}` : "\\bord0";
+    const ovWeight = (ov.fontWeight ?? 400) >= 700 ? "\\b1" : "\\b0";
+    const ovText = `{\\pos(${Math.round(ov.x)},${Math.round(ov.y)})\\fs${ov.fontSize ?? 48}\\c${ovColor}${ovOutline}${ovWeight}\\fad(150,150)}${ov.text}`;
+    ass += `Dialogue: 5,${fmtTime(ov.start)},${fmtTime(ov.end)},Default,,0,0,0,,${ovText}\n`;
+  }
+
   // Append watermark — persistent, barely visible at the very bottom
-  const showWatermark = opts?.watermark !== false; // on by default
+  const showWatermark = opts?.watermark !== false;
   if (showWatermark) {
     const duration = transcript.duration || 9999;
-    const watermark = `Dialogue: 10,${fmtTime(0)},${fmtTime(duration)},Watermark,,0,0,0,,titler.org`;
-    return ass + watermark + "\n";
+    ass += `Dialogue: 10,${fmtTime(0)},${fmtTime(duration)},Watermark,,0,0,0,,titler.org\n`;
   }
   return ass;
 }
