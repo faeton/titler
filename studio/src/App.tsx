@@ -29,9 +29,13 @@ import {
   submitBatchImport,
   submitBatchRender,
   clearJobs,
+  listPresetsApi,
+  createPreset,
+  deletePresetApi,
   type Project,
   type CropMode,
   type Job,
+  type Preset,
 } from "./api";
 import { TranscriptEditor } from "./components/TranscriptEditor";
 
@@ -69,6 +73,7 @@ export const App = () => {
   const [rendering, setRendering] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [watermark, setWatermark] = useState(true);
+  const [presets, setPresets] = useState<Preset[]>([]);
   const playerRef = useRef<PlayerRef>(null);
 
   // Jobs
@@ -81,17 +86,36 @@ export const App = () => {
   const [selectedInbox, setSelectedInbox] = useState<Set<string>>(new Set());
 
   const refresh = async () => {
-    const [i, p] = await Promise.all([
+    const [i, p, pr] = await Promise.all([
       listInbox(),
       listProjects({ archived: showArchived }),
+      listPresetsApi().catch(() => [] as Preset[]),
     ]);
     setInbox(i);
     setProjects(p);
+    setPresets(pr);
   };
 
   useEffect(() => {
     refresh().catch((e) => pushLog(`error: ${e.message}`));
   }, [showArchived]);
+
+  // Subscribe to live server events (inbox watcher notifications)
+  useEffect(() => {
+    const es = new EventSource("/api/events");
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === "new_file") {
+          pushLog(`inbox: new file detected`);
+        } else if (data.type === "project_created") {
+          pushLog(`inbox: auto-imported, ingesting...`);
+          refresh();
+        }
+      } catch { /* ignore */ }
+    };
+    return () => es.close();
+  }, []);
 
   // Poll jobs while any are active
   const hasActiveJobs = jobs.some(
@@ -841,6 +865,55 @@ export const App = () => {
                 <option value="clean">Clean</option>
                 <option value="focus">Focus</option>
               </select>
+
+              {/* Preset selector */}
+              {presets.length > 0 && (
+                <select
+                  onChange={(e) => {
+                    const p = presets.find((pr) => pr.id === e.target.value);
+                    if (p) {
+                      setCaptionStyle(p.style as any);
+                      setWatermark(p.watermark);
+                    }
+                  }}
+                  defaultValue=""
+                  style={{
+                    font: "inherit",
+                    fontSize: 11,
+                    background: "#1d1d22",
+                    color: "#aaa",
+                    border: "1px solid #2c2c33",
+                    borderRadius: 6,
+                    padding: "4px 8px",
+                  }}
+                >
+                  <option value="" disabled>
+                    presets
+                  </option>
+                  {presets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                onClick={async () => {
+                  const name = prompt("Preset name:");
+                  if (!name) return;
+                  await createPreset({
+                    name,
+                    style: captionStyle,
+                    watermark,
+                    cropMode: "center",
+                  });
+                  await refresh();
+                  pushLog(`saved preset "${name}"`);
+                }}
+                style={{ fontSize: 11, padding: "4px 8px", color: "#aaa" }}
+              >
+                save preset
+              </button>
 
               <label
                 style={{

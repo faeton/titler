@@ -26,6 +26,9 @@ import {
 } from "./jobs.js";
 import { rmSync } from "node:fs";
 import type { CropMode } from "./types.js";
+import { startInboxWatcher, onInboxEvent } from "./inbox.js";
+import { listPresets, getPreset, savePreset, deletePreset, type Preset } from "./presets.js";
+import { nanoid } from "nanoid";
 
 ensureDirs();
 
@@ -399,6 +402,63 @@ app.post<{ Params: { id: string }; Querystring: { style?: string; watermark?: st
   },
 );
 
+// ----- presets -----
+
+app.get("/presets", async () => ({ presets: listPresets() }));
+
+app.post<{ Body: { name: string; style: string; watermark?: boolean; cropMode?: string } }>(
+  "/presets",
+  async (req) => {
+    const { name, style, watermark, cropMode } = req.body ?? {};
+    const preset: Preset = {
+      id: nanoid(8),
+      name: name || "Untitled",
+      style: style || "bold",
+      watermark: watermark !== false,
+      cropMode: cropMode || "center",
+      createdAt: new Date().toISOString(),
+    };
+    savePreset(preset);
+    return preset;
+  },
+);
+
+app.delete<{ Params: { id: string } }>(
+  "/presets/:id",
+  async (req, reply) => {
+    if (!deletePreset(req.params.id))
+      return reply.code(404).send({ error: "not_found" });
+    return { ok: true };
+  },
+);
+
+// ----- live events (SSE) — inbox watcher + job updates -----
+
+app.get("/events", async (req, reply) => {
+  reply.raw.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-store",
+    Connection: "keep-alive",
+  });
+
+  const sendEvent = (data: unknown) => {
+    reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // Subscribe to inbox events
+  const unsub = onInboxEvent((ev) => sendEvent(ev));
+
+  // Keep alive
+  const keepAlive = setInterval(() => {
+    reply.raw.write(`: keepalive\n\n`);
+  }, 15000);
+
+  req.raw.on("close", () => {
+    unsub();
+    clearInterval(keepAlive);
+  });
+});
+
 // ----- static: serve the built studio under / -----
 
 const studioDist = resolve(REPO_ROOT, "studio", "dist");
@@ -422,4 +482,5 @@ app.listen({ port: PORT, host: HOST }).then(() => {
   app.log.info(`  in/: ${IN_DIR}`);
   app.log.info(`  work/: ${WORK_DIR}`);
   app.log.info(`  out/: ${OUT_DIR}`);
+  startInboxWatcher();
 });

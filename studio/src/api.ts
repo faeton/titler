@@ -146,6 +146,29 @@ export const submitBatchRender = (projectIds: string[], style: string) =>
 export const clearJobs = () =>
   api<{ ok: boolean }>("/jobs/clear", { method: "POST" });
 
+// --- presets ---
+
+export type Preset = {
+  id: string;
+  name: string;
+  style: string;
+  watermark: boolean;
+  cropMode: string;
+  createdAt: string;
+};
+
+export const listPresetsApi = () =>
+  api<{ presets: Preset[] }>("/presets").then((r) => r.presets);
+
+export const createPreset = (preset: { name: string; style: string; watermark: boolean; cropMode: string }) =>
+  api<Preset>("/presets", {
+    method: "POST",
+    body: JSON.stringify(preset),
+  });
+
+export const deletePresetApi = (id: string) =>
+  api<{ ok: boolean }>(`/presets/${id}`, { method: "DELETE" });
+
 // Subscribes to an SSE endpoint for a long-running job; calls
 // `onEvent` per message, returns a promise that resolves when the
 // stream closes. Errors in payload events surface via `onEvent`.
