@@ -75,10 +75,14 @@ export const App = () => {
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("bold");
   const [rendering, setRendering] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [projectFilter, setProjectFilter] = useState<
+    "all" | "needs_transcript" | "needs_render" | "rendered"
+  >("all");
   const [watermark, setWatermark] = useState(true);
   const [showSafeZone, setShowSafeZone] = useState(false);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [lastRenderFile, setLastRenderFile] = useState<string | null>(null);
+  const [outputsKey, setOutputsKey] = useState(0);
   const playerRef = useRef<PlayerRef>(null);
 
   // Jobs
@@ -126,13 +130,22 @@ export const App = () => {
   const hasActiveJobs = jobs.some(
     (j) => j.status === "queued" || j.status === "running",
   );
+  const prevActiveRef = useRef(false);
+  useEffect(() => {
+    // Detect transition: active → all done → refresh outputs
+    if (prevActiveRef.current && !hasActiveJobs && jobs.length > 0) {
+      setOutputsKey((k) => k + 1);
+      refresh();
+    }
+    prevActiveRef.current = hasActiveJobs;
+  }, [hasActiveJobs]);
+
   useEffect(() => {
     if (!hasActiveJobs) return;
     const interval = setInterval(async () => {
       try {
         const { jobs: fresh } = await listJobs();
         setJobs(fresh);
-        // Also refresh projects list so status updates show
         const [i, p] = await Promise.all([
           listInbox(),
           listProjects({ archived: showArchived }),
@@ -157,6 +170,45 @@ export const App = () => {
     player.addEventListener("frameupdate", handler as any);
     return () => player.removeEventListener("frameupdate", handler as any);
   }, [current]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      const player = playerRef.current;
+      if (!player) return;
+
+      switch (e.code) {
+        case "Space": {
+          e.preventDefault();
+          if (player.isPlaying()) player.pause();
+          else player.play();
+          break;
+        }
+        case "ArrowLeft": {
+          e.preventDefault();
+          const offset = e.shiftKey ? VIDEO_FPS * 5 : VIDEO_FPS;
+          const frame = Math.max(0, player.getCurrentFrame() - offset);
+          player.seekTo(frame);
+          break;
+        }
+        case "ArrowRight": {
+          e.preventDefault();
+          const offset = e.shiftKey ? VIDEO_FPS * 5 : VIDEO_FPS;
+          player.seekTo(player.getCurrentFrame() + offset);
+          break;
+        }
+        case "Escape": {
+          setCurrent(null);
+          break;
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   const pushLog = (text: string) =>
     setLogs((prev) => [...prev.slice(-200), { t: Date.now(), text }]);
@@ -504,6 +556,21 @@ export const App = () => {
     Math.round(playerProps.durationInSeconds * VIDEO_FPS),
   );
 
+  const filteredProjects = useMemo(() => {
+    switch (projectFilter) {
+      case "needs_transcript":
+        return projects.filter((p) => p.source && !p.transcript);
+      case "needs_render":
+        return projects.filter(
+          (p) => p.transcript && (p.rendered?.length ?? 0) === 0,
+        );
+      case "rendered":
+        return projects.filter((p) => (p.rendered?.length ?? 0) > 0);
+      default:
+        return projects;
+    }
+  }, [projects, projectFilter]);
+
   const hasInboxSelection = selectedInbox.size > 0;
   const hasProjectSelection = selectedProjects.size > 0;
 
@@ -631,9 +698,50 @@ export const App = () => {
             </button>
           )}
         </div>
-        {projects.length === 0 && <div className="log">none yet</div>}
+        {projects.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              gap: 2,
+              padding: "2px 8px",
+              flexWrap: "wrap",
+            }}
+          >
+            {(
+              [
+                ["all", "all"],
+                ["needs_transcript", "no tx"],
+                ["needs_render", "no render"],
+                ["rendered", "rendered"],
+              ] as const
+            ).map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setProjectFilter(val)}
+                style={{
+                  fontSize: 9,
+                  padding: "2px 6px",
+                  background:
+                    projectFilter === val ? "#facc15" : "transparent",
+                  color: projectFilter === val ? "#000" : "#666",
+                  border: "1px solid #2c2c33",
+                  borderRadius: 3,
+                  cursor: "pointer",
+                  fontWeight: projectFilter === val ? 600 : 400,
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        {filteredProjects.length === 0 && (
+          <div className="log">
+            {projects.length === 0 ? "none yet" : "no matches"}
+          </div>
+        )}
         <ul>
-          {projects.map((p) => {
+          {filteredProjects.map((p) => {
             const hasExport = (p.rendered?.length ?? 0) > 0;
             const isEdited = p.edited;
             const device = p.source?.original.device ?? "";
@@ -826,7 +934,7 @@ export const App = () => {
             </div>
           </div>
         )}
-        <OutputsPanel />
+        <OutputsPanel refreshKey={outputsKey} />
 
         {/* Job queue status */}
         {jobs.length > 0 && (

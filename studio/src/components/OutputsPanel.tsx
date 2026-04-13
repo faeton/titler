@@ -11,7 +11,9 @@ const fmtSize = (bytes: number): string => {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 };
 
-export const OutputsPanel: React.FC = () => {
+export const OutputsPanel: React.FC<{ refreshKey?: number }> = ({
+  refreshKey = 0,
+}) => {
   const [files, setFiles] = useState<OutputFile[]>([]);
   const [open, setOpen] = useState(false);
 
@@ -23,7 +25,7 @@ export const OutputsPanel: React.FC = () => {
 
   useEffect(() => {
     if (open) refresh();
-  }, [open, refresh]);
+  }, [open, refresh, refreshKey]);
 
   const onDelete = async (name: string) => {
     if (!confirm(`Delete ${name}?`)) return;
