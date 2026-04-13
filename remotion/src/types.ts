@@ -55,6 +55,19 @@ export type Project = {
 
 export type CaptionStyle = "bold" | "clean" | "focus";
 
+export type TextOverlay = {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  start: number;
+  end: number;
+  fontSize: number;
+  color: string;
+  fontWeight: number;
+  outline: boolean;
+};
+
 export type CompositionProps = {
   sourceUrl: string;
   transcript: Transcript | null;
@@ -62,6 +75,7 @@ export type CompositionProps = {
   circle?: CircleLayout | null;
   style?: CaptionStyle;
   showSafeZone?: boolean;
+  overlays?: TextOverlay[];
 };
 
 // IG Reels safe zone inside the 1080x1920 frame. See PLAN §"Target

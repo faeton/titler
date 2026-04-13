@@ -118,6 +118,27 @@ export const renameProject = (id: string, name: string) =>
     body: JSON.stringify({ name }),
   });
 
+// --- outputs ---
+
+export type OutputFile = {
+  name: string;
+  size: number;
+  mtime: string;
+};
+
+export const listOutputs = () =>
+  api<{ files: OutputFile[] }>("/outputs").then((r) => r.files);
+
+export const deleteOutput = (name: string) =>
+  api<{ ok: boolean }>(`/outputs/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+
+export const revealOutputs = () =>
+  api<{ ok: boolean }>("/outputs/reveal", { method: "POST" });
+
+// --- overlays ---
+
 export const saveOverlays = (id: string, overlays: TextOverlay[]) =>
   api<{ ok: boolean }>(`/projects/${id}/overlays`, {
     method: "PUT",
@@ -151,10 +172,10 @@ export const listJobs = () =>
 
 export const getJob = (id: string) => api<Job>(`/jobs/${id}`);
 
-export const submitBatchImport = (files: string[]) =>
+export const submitBatchImport = (files: string[], style?: string) =>
   api<{ results: { file: string; projectId?: string; error?: string }[] }>(
     "/jobs/import",
-    { method: "POST", body: JSON.stringify({ files }) },
+    { method: "POST", body: JSON.stringify({ files, style }) },
   );
 
 export const submitBatchRender = (projectIds: string[], style: string) =>

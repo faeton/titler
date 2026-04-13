@@ -79,6 +79,25 @@ app.get("/outputs", async () => {
   return { files };
 });
 
+// Delete a rendered file
+app.delete<{ Params: { name: string } }>(
+  "/outputs/:name",
+  async (req, reply) => {
+    const filePath = resolve(OUT_DIR, req.params.name);
+    if (!filePath.startsWith(OUT_DIR + "/") || !existsSync(filePath))
+      return reply.code(404).send({ error: "not_found" });
+    rmSync(filePath);
+    return { ok: true };
+  },
+);
+
+// Open out/ folder in Finder (macOS only)
+app.post("/outputs/reveal", async () => {
+  const { exec } = await import("node:child_process");
+  exec(`open "${OUT_DIR}"`);
+  return { ok: true };
+});
+
 // ----- read routes -----
 
 app.get("/health", async () => ({ ok: true }));
@@ -371,13 +390,17 @@ app.post<{
   return { jobs };
 });
 
-// Batch import from inbox: create projects + queue ingest+transcribe
+// Batch import from inbox: create projects + queue ingest+transcribe (+ optional render)
 app.post<{
-  Body: { files: string[] };
+  Body: { files: string[]; style?: string };
 }>("/jobs/import", async (req, reply) => {
-  const { files } = req.body ?? {};
+  const { files, style } = req.body ?? {};
   if (!Array.isArray(files) || files.length === 0)
     return reply.code(400).send({ error: "files_required" });
+
+  const steps: JobStep[] = style
+    ? ["ingest", "transcribe", "render"]
+    : ["ingest", "transcribe"];
 
   const results: { file: string; projectId?: string; error?: string }[] = [];
   for (const file of files) {
@@ -392,7 +415,7 @@ app.post<{
         continue;
       }
       const project = createProject(absolute);
-      submitJob(project.id, ["ingest", "transcribe"]);
+      submitJob(project.id, steps, style);
       results.push({ file, projectId: project.id });
     } catch (e) {
       results.push({ file, error: (e as Error).message });

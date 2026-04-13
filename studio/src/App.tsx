@@ -40,6 +40,7 @@ import {
 } from "./api";
 import { TranscriptEditor } from "./components/TranscriptEditor";
 import { OverlayEditor } from "./components/OverlayEditor";
+import { OutputsPanel } from "./components/OutputsPanel";
 
 // --- error boundary ---
 class ErrorBoundary extends Component<
@@ -407,18 +408,19 @@ export const App = () => {
     else setSelectedProjects(new Set(projects.map((p) => p.id)));
   };
 
-  const onBatchImport = async () => {
+  const onBatchImport = async (withRender: boolean) => {
     if (selectedInbox.size === 0) return;
     const files = [...selectedInbox];
     setSelectedInbox(new Set());
     try {
-      const { results } = await submitBatchImport(files);
+      const style = withRender ? captionStyle : undefined;
+      const { results } = await submitBatchImport(files, style);
       const ok = results.filter((r) => r.projectId).length;
       const fail = results.filter((r) => r.error).length;
+      const action = withRender ? "import+render" : "import";
       pushLog(
-        `queued ${ok} imports${fail ? ` (${fail} failed)` : ""} — processing server-side`,
+        `queued ${ok} ${action}${fail ? ` (${fail} failed)` : ""} — processing server-side`,
       );
-      // Kick off job polling
       const { jobs: fresh } = await listJobs();
       setJobs(fresh);
       await refresh();
@@ -493,6 +495,7 @@ export const App = () => {
       circle: current?.source?.circle ?? null,
       style: captionStyle,
       showSafeZone,
+      overlays: current?.overlays ?? [],
     };
   }, [current, captionStyle, showSafeZone]);
 
@@ -558,9 +561,30 @@ export const App = () => {
           })}
         </ul>
         {hasInboxSelection && (
-          <div style={{ padding: "4px 8px" }}>
+          <div
+            style={{
+              padding: "4px 8px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+          >
             <button
-              onClick={onBatchImport}
+              onClick={() => onBatchImport(false)}
+              disabled={busy}
+              style={{
+                width: "100%",
+                background: "#333",
+                color: "#e6e6e6",
+                fontWeight: 600,
+                padding: "6px",
+                fontSize: 12,
+              }}
+            >
+              import {selectedInbox.size}
+            </button>
+            <button
+              onClick={() => onBatchImport(true)}
               disabled={busy}
               style={{
                 width: "100%",
@@ -571,7 +595,7 @@ export const App = () => {
                 fontSize: 12,
               }}
             >
-              import {selectedInbox.size} selected
+              import & render ({captionStyle})
             </button>
           </div>
         )}
@@ -802,6 +826,8 @@ export const App = () => {
             </div>
           </div>
         )}
+        <OutputsPanel />
+
         {/* Job queue status */}
         {jobs.length > 0 && (
           <div style={{ padding: "8px", borderTop: "1px solid #2c2c33" }}>
