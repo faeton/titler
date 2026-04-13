@@ -19,10 +19,33 @@ type Chunk = {
   text: string;
 };
 
-// --- chunking (duplicated from remotion/lib/chunk.ts to avoid cross-package import) ---
+// --- pre-processing: fix whisper artifacts ---
+
+function preprocessWords(words: Word[]): Word[] {
+  const out: Word[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = { ...words[i] };
+    // Rejoin split numbers: "0 ,8" → "0,8", "0 ,2%" → "0,2%"
+    if (
+      i + 1 < words.length &&
+      /^\d+$/.test(w.text) &&
+      /^[,.]/.test(words[i + 1].text)
+    ) {
+      w.text = w.text + words[i + 1].text;
+      w.end = words[i + 1].end;
+      i++; // skip next
+    }
+    out.push(w);
+  }
+  return out;
+}
+
+// --- chunking ---
 
 const SENTENCE_END = /[.!?…]+$/;
 const CLAUSE_END = /[,;:—–\-]+$/;
+// Conjunctions / particles that shouldn't end a chunk
+const WEAK_TAIL = /^(но|и|а|что|как|не|на|в|к|с|у|о|за|из|от|по|до|для|при|без|ну)$/i;
 
 function breakScore(words: Word[], i: number): number {
   if (i >= words.length - 1) return 100;
@@ -35,15 +58,20 @@ function breakScore(words: Word[], i: number): number {
   if (gap > 0.6) score += 40;
   else if (gap > 0.3) score += 15;
   else if (gap > 0.15) score += 5;
+  // Penalize breaking after a weak word (conjunction/preposition)
+  const clean = w.text.replace(/[.,!?;:—\-"'«»()…]/g, "");
+  if (WEAK_TAIL.test(clean)) score -= 25;
   return score;
 }
 
 function chunkWords(words: Word[]): Chunk[] {
   const maxWords = 5;
-  const maxChars = 30;
+  const maxChars = 32;
   const maxGap = 0.7;
-  const minDuration = 0.5;
-  if (words.length === 0) return [];
+  const minDuration = 0.6;
+
+  const processed = preprocessWords(words);
+  if (processed.length === 0) return [];
 
   const chunks: Chunk[] = [];
   let buf: Word[] = [];
@@ -51,6 +79,23 @@ function chunkWords(words: Word[]): Chunk[] {
 
   const flush = () => {
     if (buf.length === 0) return;
+    // Don't let a weak word be the last in a chunk — move it to next
+    if (
+      buf.length >= 2 &&
+      WEAK_TAIL.test(buf[buf.length - 1].text.replace(/[.,!?;:—\-"'«»()…]/g, "")) &&
+      !SENTENCE_END.test(buf[buf.length - 1].text)
+    ) {
+      const moved = buf.pop()!;
+      chunks.push({
+        words: [...buf],
+        start: buf[0].start,
+        end: buf[buf.length - 1].end,
+        text: buf.map((w) => w.text).join(" "),
+      });
+      buf = [moved];
+      bufChars = moved.text.length;
+      return;
+    }
     chunks.push({
       words: buf,
       start: buf[0].start,
@@ -61,8 +106,8 @@ function chunkWords(words: Word[]): Chunk[] {
     bufChars = 0;
   };
 
-  for (let i = 0; i < words.length; i++) {
-    const w = words[i];
+  for (let i = 0; i < processed.length; i++) {
+    const w = processed[i];
     const gap = buf.length > 0 ? w.start - buf[buf.length - 1].end : 0;
     const proposedChars =
       bufChars + w.text.length + (buf.length > 0 ? 1 : 0);
@@ -73,8 +118,8 @@ function chunkWords(words: Word[]): Chunk[] {
       (buf.length >= maxWords || proposedChars > maxChars)
     ) {
       if (buf.length >= 3) {
-        const s1 = breakScore(words, i - 1);
-        const s2 = buf.length >= 2 ? breakScore(words, i - 2) : -1;
+        const s1 = breakScore(processed, i - 1);
+        const s2 = buf.length >= 2 ? breakScore(processed, i - 2) : -1;
         if (s2 > s1 + 15 && buf.length >= 2) {
           const rewind = buf.pop()!;
           flush();
@@ -94,24 +139,38 @@ function chunkWords(words: Word[]): Chunk[] {
   }
   flush();
 
-  // Merge tiny chunks
+  // Merge tiny chunks into neighbors (forward or backward)
   const merged: Chunk[] = [];
   for (const chunk of chunks) {
     const dur = chunk.end - chunk.start;
-    if (
-      dur < minDuration &&
-      merged.length > 0 &&
-      merged[merged.length - 1].words.length + chunk.words.length <= 6
-    ) {
+    if (dur < minDuration && merged.length > 0) {
       const prev = merged[merged.length - 1];
-      prev.words = [...prev.words, ...chunk.words];
-      prev.end = chunk.end;
-      prev.text = prev.words.map((w) => w.text).join(" ");
-    } else {
-      merged.push(chunk);
+      if (prev.words.length + chunk.words.length <= 7) {
+        prev.words = [...prev.words, ...chunk.words];
+        prev.end = chunk.end;
+        prev.text = prev.words.map((w) => w.text).join(" ");
+        continue;
+      }
     }
+    merged.push(chunk);
   }
-  return merged;
+  // Second pass: merge any remaining tiny chunks forward
+  const final: Chunk[] = [];
+  for (let i = 0; i < merged.length; i++) {
+    const chunk = merged[i];
+    const dur = chunk.end - chunk.start;
+    if (dur < minDuration && i + 1 < merged.length) {
+      const next = merged[i + 1];
+      if (next.words.length + chunk.words.length <= 7) {
+        next.words = [...chunk.words, ...next.words];
+        next.start = chunk.start;
+        next.text = next.words.map((w) => w.text).join(" ");
+        continue;
+      }
+    }
+    final.push(chunk);
+  }
+  return final;
 }
 
 // --- ASS helpers ---
