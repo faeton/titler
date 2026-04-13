@@ -191,6 +191,33 @@ const hexToAss = (hex: string, alpha = 0): string => {
   return `&H${a}${b}${g}${r}&`.toUpperCase();
 };
 
+// Fix overlapping dialogue lines. ASS renders all active lines
+// simultaneously, so overlaps cause stacking. Trim the earlier
+// line's end to the later line's start.
+function deOverlap(events: string[]): string[] {
+  const parseT = (t: string) => {
+    const [h, mm, ss] = t.split(":");
+    return Number(h) * 3600 + Number(mm) * 60 + Number(ss);
+  };
+  const parsed = events.map((line) => {
+    const m = line.match(
+      /^Dialogue:\s*\d+,(\d+:\d+:\d+\.\d+),(\d+:\d+:\d+\.\d+),/,
+    );
+    if (!m) return { line, start: 0, end: 0 };
+    return { line, start: parseT(m[1]), end: parseT(m[2]) };
+  });
+  for (let i = 1; i < parsed.length; i++) {
+    if (parsed[i - 1].end > parsed[i].start) {
+      const newEnd = Math.max(parsed[i - 1].start + 0.01, parsed[i].start - 0.01);
+      parsed[i - 1].line = parsed[i - 1].line.replace(
+        /^(Dialogue:\s*\d+,\d+:\d+:\d+\.\d+,)\d+:\d+:\d+\.\d+/,
+        `$1${fmtTime(newEnd)}`,
+      );
+    }
+  }
+  return parsed.map((p) => p.line);
+}
+
 const REELS_SAFE = { x: 30, y: 250, w: 1020, h: 1220 };
 
 // Unified caption Y position. For IG Reels the lower third works best.
@@ -310,7 +337,7 @@ function generateBoldAss(
     }
   }
 
-  return header + "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" + events.join("\n") + "\n";
+  return header + "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" + deOverlap(events).join("\n") + "\n";
 }
 
 // --- CLEAN style ---
@@ -353,7 +380,7 @@ function generateCleanAss(
     );
   }
 
-  return header + "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" + events.join("\n") + "\n";
+  return header + "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" + deOverlap(events).join("\n") + "\n";
 }
 
 // --- FOCUS style ---
@@ -417,7 +444,7 @@ function generateFocusAss(
     }
   }
 
-  return header + "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" + events.join("\n") + "\n";
+  return header + "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" + deOverlap(events).join("\n") + "\n";
 }
 
 // --- Header builder ---

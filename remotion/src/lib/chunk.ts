@@ -172,27 +172,3 @@ export function chunkWords(words: Word[], opts: ChunkOpts = {}): Chunk[] {
   return final;
 }
 
-const TRIGGER_WORDS = new Set([
-  "важно", "никогда", "всегда", "лучший", "деньги", "бесплатно", "секрет",
-  "круто", "реально", "точно", "просто", "вообще", "кстати", "кайф",
-  "never", "always", "best", "money", "free", "secret", "now", "stop",
-  "amazing", "actually", "literally", "insane", "crazy",
-]);
-
-export function pickKeyword(chunk: Chunk): number {
-  let best = -1;
-  let bestLen = 0;
-
-  for (let i = 0; i < chunk.words.length; i++) {
-    const clean = chunk.words[i].text
-      .replace(/[.,!?;:—\-"'«»()…]/g, "")
-      .toLowerCase();
-    if (TRIGGER_WORDS.has(clean)) return i;
-    if (clean.length >= 5 && clean.length > bestLen) {
-      bestLen = clean.length;
-      best = i;
-    }
-  }
-
-  return best;
-}
