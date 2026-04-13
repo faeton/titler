@@ -568,10 +568,20 @@ if (existsSync(studioDist)) {
 }
 
 const PORT = Number(process.env.TITLER_STUDIO_PORT ?? 7777);
-const HOST = process.env.TITLER_STUDIO_HOST ?? "127.0.0.1";
+const HOST = process.env.TITLER_STUDIO_HOST ?? "0.0.0.0";
 
-app.listen({ port: PORT, host: HOST }).then(() => {
-  app.log.info(`titler studio listening on http://${HOST}:${PORT}`);
+app.listen({ port: PORT, host: HOST }).then(async () => {
+  const os = await import("node:os");
+  let localIp = "127.0.0.1";
+  for (const iface of Object.values(os.networkInterfaces())) {
+    for (const info of iface ?? []) {
+      if (info.family === "IPv4" && !info.internal) { localIp = info.address; break; }
+    }
+    if (localIp !== "127.0.0.1") break;
+  }
+  app.log.info(`titler studio listening on:`);
+  app.log.info(`  local:   http://127.0.0.1:${PORT}`);
+  app.log.info(`  network: http://${localIp}:${PORT}`);
   app.log.info(`  repo root: ${REPO_ROOT}`);
   app.log.info(`  in/: ${IN_DIR}`);
   app.log.info(`  work/: ${WORK_DIR}`);

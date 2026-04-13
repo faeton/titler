@@ -86,6 +86,11 @@ export const submitJob = (
           case "render": {
             if (!project.transcript) throw new Error("not transcribed");
             const style = renderStyle ?? "bold";
+            // Skip if already rendered with this style
+            if (project.rendered?.includes(style)) {
+              job.progress = `render: skipped (${style} already done)`;
+              break;
+            }
             const { renderProjectFfmpeg } = await import("./renderFfmpeg.js");
             await renderProjectFfmpeg(projectId, style, (p) => {
               if ("percent" in p) {
