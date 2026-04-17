@@ -115,10 +115,11 @@ export const App = () => {
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
+        const name = (data.file as string | undefined)?.split("/").pop() ?? "?";
         if (data.type === "new_file") {
-          pushLog(`inbox: new file detected`);
+          pushLog(`inbox: ${name} — detected`);
         } else if (data.type === "project_created") {
-          pushLog(`inbox: auto-imported, ingesting...`);
+          pushLog(`inbox: ${name} — importing`);
           refresh();
         }
       } catch { /* ignore */ }
@@ -139,6 +140,25 @@ export const App = () => {
     }
     prevActiveRef.current = hasActiveJobs;
   }, [hasActiveJobs]);
+
+  // Log per-job finish transitions (queued/running → done/error)
+  const prevJobsRef = useRef<Job[]>([]);
+  useEffect(() => {
+    const prev = prevJobsRef.current;
+    for (const j of jobs) {
+      const before = prev.find((p) => p.id === j.id);
+      if (!before) continue;
+      if (before.status === j.status) continue;
+      const proj = projects.find((p) => p.id === j.projectId);
+      const name = proj?.name ?? j.projectId;
+      if (j.status === "done") {
+        pushLog(`✓ ${name} — ${j.steps.join("+")} done`);
+      } else if (j.status === "error") {
+        pushLog(`✗ ${name} — ${j.error ?? "failed"}`);
+      }
+    }
+    prevJobsRef.current = jobs;
+  }, [jobs, projects]);
 
   useEffect(() => {
     if (!hasActiveJobs) return;
@@ -754,6 +774,15 @@ export const App = () => {
                 ? `${Math.floor(dur / 60)}:${String(Math.floor(dur % 60)).padStart(2, "0")}`
                 : "";
             const selected = selectedProjects.has(p.id);
+            const activeJob = jobs.find(
+              (j) =>
+                j.projectId === p.id &&
+                (j.status === "running" || j.status === "queued"),
+            );
+            const errorJob = !activeJob
+              ? jobs.find((j) => j.projectId === p.id && j.status === "error")
+              : undefined;
+            const isReady = !activeJob && !errorJob && !!p.transcript;
 
             return (
               <li
@@ -824,6 +853,48 @@ export const App = () => {
                     {durStr && (
                       <span style={{ fontSize: 10, color: "#666" }}>
                         {durStr}
+                      </span>
+                    )}
+
+                    {activeJob && (
+                      <span
+                        title={activeJob.progress ?? activeJob.status}
+                        style={{
+                          fontSize: 9,
+                          color:
+                            activeJob.status === "running"
+                              ? "#facc15"
+                              : "#888",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {activeJob.status === "running"
+                          ? `\u27F3 ${activeJob.currentStep ?? "running"}`
+                          : "\u23F3 queued"}
+                      </span>
+                    )}
+                    {errorJob && (
+                      <span
+                        title={errorJob.error ?? "failed"}
+                        style={{
+                          fontSize: 9,
+                          color: "#ef4444",
+                          fontWeight: 700,
+                        }}
+                      >
+                        !
+                      </span>
+                    )}
+                    {isReady && !hasExport && (
+                      <span
+                        title="ready to render"
+                        style={{
+                          fontSize: 9,
+                          color: "#4ade80",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {"\u2713"}
                       </span>
                     )}
 
