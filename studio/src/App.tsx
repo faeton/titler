@@ -26,6 +26,7 @@ import {
   renameProject,
   runStream,
   listJobs,
+  submitJob,
   submitBatchImport,
   submitBatchRender,
   clearJobs,
@@ -41,6 +42,7 @@ import {
 import { TranscriptEditor } from "./components/TranscriptEditor";
 import { OverlayEditor } from "./components/OverlayEditor";
 import { OutputsPanel } from "./components/OutputsPanel";
+import { JobsDropdown } from "./components/JobsDropdown";
 
 // --- error boundary ---
 class ErrorBoundary extends Component<
@@ -87,6 +89,12 @@ export const App = () => {
 
   // Jobs
   const [jobs, setJobs] = useState<Job[]>([]);
+
+  // Re-transcribe options (sticky across projects this session)
+  const [retxOpen, setRetxOpen] = useState(false);
+  const [retxLang, setRetxLang] = useState<string>("");
+  const [retxPrompt, setRetxPrompt] = useState<string>("");
+  const [retxBackend, setRetxBackend] = useState<"" | "mlx" | "faster">("");
 
   // Batch selection
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(
@@ -137,6 +145,16 @@ export const App = () => {
     if (prevActiveRef.current && !hasActiveJobs && jobs.length > 0) {
       setOutputsKey((k) => k + 1);
       refresh();
+      // Re-fetch the currently opened project so a just-finished
+      // re-transcribe (or ingest) shows up live in the stage + editor.
+      setCurrent((c) => {
+        if (!c) return c;
+        const id = c.id;
+        getProject(id)
+          .then((fresh) => setCurrent((cur) => (cur?.id === id ? fresh : cur)))
+          .catch(() => {});
+        return c;
+      });
     }
     prevActiveRef.current = hasActiveJobs;
   }, [hasActiveJobs]);
@@ -330,25 +348,61 @@ export const App = () => {
     }
   }, [current, captionStyle]);
 
-  const onEditWord = useCallback(
-    async (index: number, newText: string) => {
-      if (!current?.transcript) return;
-      const updated = { ...current };
-      const words = [...current.transcript.words];
-      words[index] = { ...words[index], text: newText };
-      updated.transcript = { ...current.transcript, words };
-      setCurrent(updated);
+  const saveWords = useCallback(
+    async (projectId: string, words: import("./api").Word[]) => {
       try {
-        await fetch(`/api/projects/${current.id}/transcript`, {
+        await fetch(`/api/projects/${projectId}/transcript`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ words }),
         });
+        setCurrent((c) => (c && c.id === projectId ? { ...c, edited: true } : c));
+        setProjects((ps) =>
+          ps.map((p) => (p.id === projectId ? { ...p, edited: true } : p)),
+        );
       } catch (e) {
         pushLog(`save error: ${(e as Error).message}`);
       }
     },
-    [current],
+    [],
+  );
+
+  const onEditWord = useCallback(
+    async (index: number, newText: string) => {
+      if (!current?.transcript) return;
+      const words = [...current.transcript.words];
+      words[index] = { ...words[index], text: newText };
+      setCurrent({ ...current, transcript: { ...current.transcript, words } });
+      await saveWords(current.id, words);
+    },
+    [current, saveWords],
+  );
+
+  const onDeleteWord = useCallback(
+    async (index: number) => {
+      if (!current?.transcript) return;
+      const words = current.transcript.words.filter((_, i) => i !== index);
+      setCurrent({ ...current, transcript: { ...current.transcript, words } });
+      await saveWords(current.id, words);
+    },
+    [current, saveWords],
+  );
+
+  const onInsertWord = useCallback(
+    async (afterIndex: number, text: string) => {
+      if (!current?.transcript) return;
+      const words = [...current.transcript.words];
+      const prev = afterIndex >= 0 ? words[afterIndex] : undefined;
+      const next = afterIndex + 1 < words.length ? words[afterIndex + 1] : undefined;
+      const start = prev?.end ?? 0;
+      const gap = next ? next.start - start : 0.3;
+      const end = gap > 0 ? start + Math.min(gap, 0.4) : start + 0.3;
+      const newWord: import("./api").Word = { start, end, text, prob: 1 };
+      words.splice(afterIndex + 1, 0, newWord);
+      setCurrent({ ...current, transcript: { ...current.transcript, words } });
+      await saveWords(current.id, words);
+    },
+    [current, saveWords],
   );
 
   // --- overlays ---
@@ -506,9 +560,10 @@ export const App = () => {
     const ids = [...selectedProjects];
     setSelectedProjects(new Set());
     try {
-      const { jobs: newJobs } = await submitBatchRender(ids, captionStyle);
+      const { jobs: newJobs, skipped } = await submitBatchRender(ids, captionStyle);
+      const skipMsg = skipped.length ? ` (${skipped.length} skipped)` : "";
       pushLog(
-        `queued ${newJobs.length} renders (${captionStyle}) — processing server-side`,
+        `queued ${newJobs.length} renders (${captionStyle})${skipMsg} — processing server-side`,
       );
       const { jobs: fresh } = await listJobs();
       setJobs(fresh);
@@ -1006,72 +1061,6 @@ export const App = () => {
           </div>
         )}
         <OutputsPanel refreshKey={outputsKey} />
-
-        {/* Job queue status */}
-        {jobs.length > 0 && (
-          <div style={{ padding: "8px", borderTop: "1px solid #2c2c33" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                marginBottom: 4,
-              }}
-            >
-              <h2
-                style={{ flex: 1, fontSize: 11, color: "#888", margin: 0 }}
-              >
-                jobs
-              </h2>
-              <button
-                onClick={async () => {
-                  await clearJobs();
-                  const { jobs: fresh } = await listJobs();
-                  setJobs(fresh);
-                }}
-                style={{ fontSize: 9, padding: "2px 5px", color: "#888" }}
-              >
-                clear done
-              </button>
-            </div>
-            {jobs.slice(0, 10).map((j) => {
-              const proj = projects.find((p) => p.id === j.projectId);
-              const name = proj?.name ?? j.projectId;
-              const short = name.length > 20 ? name.slice(0, 18) + "\u2026" : name;
-              return (
-                <div
-                  key={j.id}
-                  style={{
-                    fontSize: 10,
-                    padding: "2px 0",
-                    color:
-                      j.status === "error"
-                        ? "#ef4444"
-                        : j.status === "done"
-                          ? "#4ade80"
-                          : j.status === "running"
-                            ? "#facc15"
-                            : "#888",
-                  }}
-                >
-                  <span style={{ fontWeight: 600 }}>
-                    {j.status === "running"
-                      ? "\u25B6"
-                      : j.status === "queued"
-                        ? "\u23F3"
-                        : j.status === "done"
-                          ? "\u2713"
-                          : "\u2717"}
-                  </span>{" "}
-                  {short}{" "}
-                  <span style={{ color: "#666" }}>
-                    {j.progress ?? j.status}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </aside>
 
       <section className="main">
@@ -1281,13 +1270,27 @@ export const App = () => {
             </div>
           )}
 
-          <button
-            onClick={() => refresh()}
-            disabled={busy}
-            style={{ marginLeft: "auto" }}
+          <div
+            style={{
+              marginLeft: "auto",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
           >
-            refresh
-          </button>
+            <JobsDropdown
+              jobs={jobs}
+              projects={projects}
+              onClear={async () => {
+                await clearJobs();
+                const { jobs: fresh } = await listJobs();
+                setJobs(fresh);
+              }}
+            />
+            <button onClick={() => refresh()} disabled={busy}>
+              refresh
+            </button>
+          </div>
         </div>
 
         <div className="stage">
@@ -1317,9 +1320,86 @@ export const App = () => {
               </div>
             ) : (
               <div className="empty">
-                {current
-                  ? "ingesting..."
-                  : "select a project or pick from inbox"}
+                {current ? (
+                  (() => {
+                    const job = jobs.find(
+                      (j) =>
+                        j.projectId === current.id &&
+                        (j.status === "running" || j.status === "queued"),
+                    );
+                    const errJob = !job
+                      ? jobs.find(
+                          (j) =>
+                            j.projectId === current.id && j.status === "error",
+                        )
+                      : undefined;
+                    if (job) {
+                      return (
+                        <div>
+                          {job.status === "running"
+                            ? `${job.currentStep ?? "running"}: ${job.progress ?? ""}`
+                            : "queued..."}
+                        </div>
+                      );
+                    }
+                    if (errJob) {
+                      return (
+                        <div>
+                          <div style={{ color: "#ef4444", marginBottom: 8 }}>
+                            error: {errJob.error ?? "unknown"}
+                          </div>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await submitJob(current.id, [
+                                  "ingest",
+                                  "transcribe",
+                                ]);
+                                const { jobs: fresh } = await listJobs();
+                                setJobs(fresh);
+                                pushLog(`retry queued for ${current.name}`);
+                              } catch (e) {
+                                pushLog(
+                                  `retry error: ${(e as Error).message}`,
+                                );
+                              }
+                            }}
+                          >
+                            retry ingest + transcribe
+                          </button>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div>
+                        <div style={{ marginBottom: 8 }}>not ingested yet</div>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await submitJob(current.id, [
+                                "ingest",
+                                "transcribe",
+                              ]);
+                              const { jobs: fresh } = await listJobs();
+                              setJobs(fresh);
+                              pushLog(
+                                `queued ingest + transcribe for ${current.name}`,
+                              );
+                            } catch (e) {
+                              pushLog(
+                                `queue error: ${(e as Error).message}`,
+                              );
+                            }
+                          }}
+                        >
+                          start ingest + transcribe
+                        </button>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  "select a project or pick from inbox"
+                )}
               </div>
             )}
           </div>
@@ -1327,15 +1407,190 @@ export const App = () => {
           <div className="side-panel">
             {current?.transcript && (
               <>
-                <h2 style={{ fontSize: 11, color: "#888" }}>
-                  transcript · click word to hear · double-click to edit
-                </h2>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <h2 style={{ fontSize: 11, color: "#888", flex: 1, margin: 0 }}>
+                    transcript · click=hear · dblclick=edit · × removes · dblclick gap=insert
+                  </h2>
+                  <button
+                    onClick={() => setRetxOpen((v) => !v)}
+                    style={{ fontSize: 10, padding: "2px 6px", color: "#aaa" }}
+                    title="Re-run transcription with options"
+                  >
+                    re-transcribe {retxOpen ? "\u25B2" : "\u25BC"}
+                  </button>
+                </div>
+                {retxOpen && (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                      padding: 8,
+                      margin: "6px 0",
+                      background: "#1a1a1f",
+                      border: "1px solid #2c2c33",
+                      borderRadius: 4,
+                    }}
+                  >
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 11,
+                        color: "#888",
+                      }}
+                    >
+                      <span style={{ width: 70 }}>language</span>
+                      <select
+                        value={retxLang}
+                        onChange={(e) => setRetxLang(e.target.value)}
+                        style={{ flex: 1 }}
+                      >
+                        <option value="">auto-detect</option>
+                        <option value="en">English</option>
+                        <option value="ru">Russian</option>
+                        <option value="uk">Ukrainian</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="it">Italian</option>
+                        <option value="pt">Portuguese</option>
+                        <option value="pl">Polish</option>
+                        <option value="nl">Dutch</option>
+                        <option value="ja">Japanese</option>
+                        <option value="zh">Chinese</option>
+                        <option value="ko">Korean</option>
+                        <option value="ar">Arabic</option>
+                        <option value="tr">Turkish</option>
+                      </select>
+                    </label>
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 11,
+                        color: "#888",
+                      }}
+                    >
+                      <span style={{ width: 70 }}>backend</span>
+                      <select
+                        value={retxBackend}
+                        onChange={(e) =>
+                          setRetxBackend(
+                            e.target.value as "" | "mlx" | "faster",
+                          )
+                        }
+                        style={{ flex: 1 }}
+                      >
+                        <option value="">default (mlx → faster)</option>
+                        <option value="mlx">mlx (Apple Silicon)</option>
+                        <option value="faster">faster-whisper</option>
+                      </select>
+                    </label>
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                        fontSize: 11,
+                        color: "#888",
+                      }}
+                    >
+                      <span>
+                        initial prompt (bias vocabulary / style)
+                      </span>
+                      <textarea
+                        value={retxPrompt}
+                        onChange={(e) => setRetxPrompt(e.target.value)}
+                        rows={2}
+                        placeholder="e.g. names, jargon, language register — feeds whisper as context"
+                        style={{
+                          fontSize: 11,
+                          padding: 4,
+                          resize: "vertical",
+                          fontFamily: "inherit",
+                        }}
+                      />
+                    </label>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "flex-end",
+                        gap: 6,
+                      }}
+                    >
+                      <button
+                        onClick={() => setRetxOpen(false)}
+                        style={{ fontSize: 11, padding: "4px 10px" }}
+                      >
+                        cancel
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!current) return;
+                          const msg = current.edited
+                            ? "Re-transcribe from scratch? Your manual edits will be lost."
+                            : "Re-transcribe from scratch?";
+                          if (!confirm(msg)) return;
+                          try {
+                            await submitJob(
+                              current.id,
+                              ["transcribe"],
+                              undefined,
+                              {
+                                language: retxLang || undefined,
+                                initialPrompt: retxPrompt || undefined,
+                                backend: retxBackend || undefined,
+                              },
+                            );
+                            const { jobs: fresh } = await listJobs();
+                            setJobs(fresh);
+                            const opts = [
+                              retxLang && `lang=${retxLang}`,
+                              retxBackend && `backend=${retxBackend}`,
+                              retxPrompt && "prompt",
+                            ]
+                              .filter(Boolean)
+                              .join(" ");
+                            pushLog(
+                              `re-transcribe queued for ${current.name}${opts ? ` (${opts})` : ""}`,
+                            );
+                            setRetxOpen(false);
+                          } catch (e) {
+                            pushLog(
+                              `re-transcribe error: ${(e as Error).message}`,
+                            );
+                          }
+                        }}
+                        style={{
+                          fontSize: 11,
+                          padding: "4px 10px",
+                          background: "#facc15",
+                          color: "#000",
+                          fontWeight: 600,
+                        }}
+                      >
+                        run
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <TranscriptEditor
                   transcript={current.transcript}
                   currentTime={currentTime}
                   onSeek={onSeek}
                   onPause={onPause}
                   onEdit={onEditWord}
+                  onDelete={onDeleteWord}
+                  onInsert={onInsertWord}
                 />
               </>
             )}

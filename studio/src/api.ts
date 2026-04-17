@@ -172,6 +172,24 @@ export const listJobs = () =>
 
 export const getJob = (id: string) => api<Job>(`/jobs/${id}`);
 
+export type TranscribeOptions = {
+  language?: string;
+  initialPrompt?: string;
+  backend?: "mlx" | "faster";
+  model?: string;
+};
+
+export const submitJob = (
+  projectId: string,
+  steps: JobStep[],
+  style?: string,
+  transcribeOptions?: TranscribeOptions,
+) =>
+  api<Job>("/jobs", {
+    method: "POST",
+    body: JSON.stringify({ projectId, steps, style, transcribeOptions }),
+  });
+
 export const submitBatchImport = (files: string[], style?: string) =>
   api<{ results: { file: string; projectId?: string; error?: string }[] }>(
     "/jobs/import",
@@ -179,7 +197,7 @@ export const submitBatchImport = (files: string[], style?: string) =>
   );
 
 export const submitBatchRender = (projectIds: string[], style: string) =>
-  api<{ jobs: Job[] }>("/jobs/batch", {
+  api<{ jobs: Job[]; skipped: string[] }>("/jobs/batch", {
     method: "POST",
     body: JSON.stringify({ projectIds, steps: ["render"], style }),
   });

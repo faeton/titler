@@ -14,9 +14,17 @@ export type TranscribeProgress =
   | { phase: "log"; line: string }
   | { phase: "done"; transcript: Transcript };
 
+export type TranscribeOptions = {
+  language?: string; // e.g. "en", "ru", "uk"; undefined = auto-detect
+  initialPrompt?: string; // vocabulary / style hint
+  backend?: "mlx" | "faster";
+  model?: string;
+};
+
 export const transcribeProject = async (
   projectId: string,
   onProgress: (p: TranscribeProgress) => void,
+  options: TranscribeOptions = {},
 ): Promise<Transcript> => {
   const project = getProject(projectId);
   if (!project) throw new Error(`project ${projectId} not found`);
@@ -28,12 +36,17 @@ export const transcribeProject = async (
   const script = resolve(SCRIPTS_DIR, "transcribe.py");
   const python = existsSync(VENV_PYTHON) ? VENV_PYTHON : "python3";
 
+  const args: string[] = [script, project.source!.audioPath, outJson];
+  if (options.backend) args.push("--backend", options.backend);
+  if (options.model) args.push("--model", options.model);
+  if (options.language) args.push("--lang", options.language);
+  if (options.initialPrompt)
+    args.push("--initial-prompt", options.initialPrompt);
+
   onProgress({ phase: "start" });
 
   await new Promise<void>((resolvePromise, rejectPromise) => {
-    const proc = spawn(python, [script, project.source!.audioPath, outJson], {
-      env: process.env,
-    });
+    const proc = spawn(python, args, { env: process.env });
 
     let stderrBuf = "";
     let stdoutBuf = "";

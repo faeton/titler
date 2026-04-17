@@ -8,6 +8,7 @@ __pycache__/
 in/
 out/
 work/
+logs/
 
 # IDE / OS
 .DS_Store

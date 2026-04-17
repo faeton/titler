@@ -3,8 +3,10 @@ Unified transcription script. Emits word-level JSON.
 
 usage:
   transcribe.py <audio_or_video> <out.json>
+    [--backend mlx|faster] [--model NAME]
+    [--lang CODE] [--initial-prompt TEXT]
 
-Backend selection:
+Backend selection (if --backend not passed):
   1. env TITLER_WHISPER_BACKEND="mlx" | "faster"    (explicit override)
   2. otherwise: try mlx-whisper first (Apple Silicon), fall back to
      faster-whisper (cross-platform; CPU on Linux/Mac, CUDA on Linux
@@ -21,6 +23,7 @@ Output shape (same regardless of backend):
 Progress lines go to stderr. The final line on stdout is "DONE".
 """
 
+import argparse
 import json
 import os
 import sys
@@ -37,19 +40,32 @@ def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-def transcribe_mlx(audio: str) -> Optional[dict]:
+def transcribe_mlx(
+    audio: str,
+    model_override: Optional[str] = None,
+    language: Optional[str] = None,
+    initial_prompt: Optional[str] = None,
+) -> Optional[dict]:
     try:
         import mlx_whisper  # noqa
     except ImportError:
         return None
-    model = os.environ.get("TITLER_WHISPER_MODEL") or DEFAULT_MLX_MODEL
-    log(f"backend=mlx model={model}")
-    t0 = time.time()
-    result = mlx_whisper.transcribe(
-        audio,
-        path_or_hf_repo=model,
-        word_timestamps=True,
+    model = model_override or os.environ.get("TITLER_WHISPER_MODEL") or DEFAULT_MLX_MODEL
+    log(
+        f"backend=mlx model={model}"
+        + (f" lang={language}" if language else " lang=auto")
+        + (f" prompt={initial_prompt[:40]!r}" if initial_prompt else "")
     )
+    t0 = time.time()
+    kwargs: dict = {
+        "path_or_hf_repo": model,
+        "word_timestamps": True,
+    }
+    if language:
+        kwargs["language"] = language
+    if initial_prompt:
+        kwargs["initial_prompt"] = initial_prompt
+    result = mlx_whisper.transcribe(audio, **kwargs)
     log(f"mlx transcribe done in {time.time() - t0:.1f}s")
 
     words: list[dict] = []
@@ -75,24 +91,38 @@ def transcribe_mlx(audio: str) -> Optional[dict]:
     }
 
 
-def transcribe_faster(audio: str) -> Optional[dict]:
+def transcribe_faster(
+    audio: str,
+    model_override: Optional[str] = None,
+    language: Optional[str] = None,
+    initial_prompt: Optional[str] = None,
+) -> Optional[dict]:
     try:
         from faster_whisper import WhisperModel
     except ImportError:
         return None
-    model_name = os.environ.get("TITLER_WHISPER_MODEL") or DEFAULT_FASTER_MODEL
+    model_name = model_override or os.environ.get("TITLER_WHISPER_MODEL") or DEFAULT_FASTER_MODEL
     device = os.environ.get("TITLER_WHISPER_DEVICE") or "auto"
     compute_type = os.environ.get("TITLER_WHISPER_COMPUTE_TYPE") or "int8"
-    log(f"backend=faster model={model_name} device={device} compute_type={compute_type}")
+    log(
+        f"backend=faster model={model_name} device={device} "
+        f"compute_type={compute_type}"
+        + (f" lang={language}" if language else " lang=auto")
+        + (f" prompt={initial_prompt[:40]!r}" if initial_prompt else "")
+    )
     t0 = time.time()
     model = WhisperModel(model_name, device=device, compute_type=compute_type)
-    segments_iter, info = model.transcribe(
-        audio,
-        word_timestamps=True,
-        vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 300},
-        beam_size=5,
-    )
+    transcribe_kwargs: dict = {
+        "word_timestamps": True,
+        "vad_filter": True,
+        "vad_parameters": {"min_silence_duration_ms": 300},
+        "beam_size": 5,
+    }
+    if language:
+        transcribe_kwargs["language"] = language
+    if initial_prompt:
+        transcribe_kwargs["initial_prompt"] = initial_prompt
+    segments_iter, info = model.transcribe(audio, **transcribe_kwargs)
     words: list[dict] = []
     for seg in segments_iter:
         if not seg.words:
@@ -121,29 +151,50 @@ def transcribe_faster(audio: str) -> Optional[dict]:
 
 
 def main() -> int:
-    if len(sys.argv) < 3:
-        log("usage: transcribe.py <audio_or_video> <out.json>")
-        return 2
+    parser = argparse.ArgumentParser(description="Titler transcription")
+    parser.add_argument("audio", help="path to audio or video file")
+    parser.add_argument("out", help="path to output JSON file")
+    parser.add_argument(
+        "--backend",
+        choices=["mlx", "faster"],
+        default=None,
+        help="force backend (otherwise env/auto)",
+    )
+    parser.add_argument("--model", default=None, help="override model name")
+    parser.add_argument(
+        "--lang",
+        default=None,
+        help="force language code (e.g. en, ru, uk); omit for auto-detect",
+    )
+    parser.add_argument(
+        "--initial-prompt",
+        default=None,
+        help="text hint to bias vocabulary / style",
+    )
+    args = parser.parse_args()
 
-    src = sys.argv[1]
-    out_path = Path(sys.argv[2])
+    src = args.audio
+    out_path = Path(args.out)
+    model_override = args.model
+    language = args.lang or None
+    initial_prompt = args.initial_prompt or None
 
-    override = os.environ.get("TITLER_WHISPER_BACKEND", "").strip().lower()
-    if override == "mlx":
-        result = transcribe_mlx(src)
+    backend = (args.backend or os.environ.get("TITLER_WHISPER_BACKEND", "")).strip().lower()
+    if backend == "mlx":
+        result = transcribe_mlx(src, model_override, language, initial_prompt)
         if result is None:
-            log("mlx-whisper not installed; cannot honor TITLER_WHISPER_BACKEND=mlx")
+            log("mlx-whisper not installed; cannot honor --backend=mlx")
             return 1
-    elif override == "faster":
-        result = transcribe_faster(src)
+    elif backend == "faster":
+        result = transcribe_faster(src, model_override, language, initial_prompt)
         if result is None:
-            log("faster-whisper not installed; cannot honor TITLER_WHISPER_BACKEND=faster")
+            log("faster-whisper not installed; cannot honor --backend=faster")
             return 1
     else:
-        result = transcribe_mlx(src)
+        result = transcribe_mlx(src, model_override, language, initial_prompt)
         if result is None:
             log("mlx-whisper not available, trying faster-whisper")
-            result = transcribe_faster(src)
+            result = transcribe_faster(src, model_override, language, initial_prompt)
         if result is None:
             log("no supported whisper backend installed "
                 "(expected mlx-whisper or faster-whisper)")

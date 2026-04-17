@@ -2,10 +2,15 @@ import PQueue from "p-queue";
 import { nanoid } from "nanoid";
 import { getProject } from "./projects.js";
 import { ingestProject } from "./ingest.js";
-import { transcribeProject } from "./transcribe.js";
+import { transcribeProject, type TranscribeOptions } from "./transcribe.js";
 
 // Server-side job queue. Runs independently of the browser —
 // submit a batch, close the tab, come back later.
+//
+// Two separate queues so ingest (ffmpeg / P-cores) and transcribe
+// (mlx-whisper / Neural Engine + GPU) pipeline instead of blocking
+// each other. Ingest of file B runs while transcribe of file A runs.
+// Render is ffmpeg-bound, shares the ingest queue.
 
 export type JobStatus = "queued" | "running" | "done" | "error";
 
@@ -23,11 +28,13 @@ export type Job = {
   finishedAt?: string;
 };
 
-// In-memory store (no persistence needed — jobs are short-lived)
 const jobs = new Map<string, Job>();
 
-// Single-concurrency queue: one CPU-heavy job at a time
-const queue = new PQueue({ concurrency: 1 });
+const ingestQueue = new PQueue({ concurrency: 1 });
+const transcribeQueue = new PQueue({ concurrency: 1 });
+
+const queueFor = (step: JobStep) =>
+  step === "transcribe" ? transcribeQueue : ingestQueue;
 
 export const getJob = (id: string): Job | undefined => jobs.get(id);
 
@@ -42,11 +49,11 @@ export const clearFinishedJobs = () => {
   }
 };
 
-// Submit a job for a single project. Steps run in order.
 export const submitJob = (
   projectId: string,
   steps: JobStep[],
   renderStyle?: string,
+  transcribeOptions?: TranscribeOptions,
 ): Job => {
   const job: Job = {
     id: nanoid(8),
@@ -57,57 +64,73 @@ export const submitJob = (
   };
   jobs.set(job.id, job);
 
-  queue.add(async () => {
-    job.status = "running";
+  (async () => {
     try {
       for (const step of job.steps) {
-        job.currentStep = step;
-        job.progress = `${step}...`;
+        await queueFor(step).add(async () => {
+          job.status = "running";
+          job.currentStep = step;
+          job.progress = `${step}...`;
 
-        const project = getProject(projectId);
-        if (!project) throw new Error(`project ${projectId} not found`);
+          const project = getProject(projectId);
+          if (!project) throw new Error(`project ${projectId} not found`);
 
-        switch (step) {
-          case "ingest":
-            await ingestProject(projectId, (p) => {
-              if ("outTimeMs" in p) {
-                job.progress = `ingest: ${Math.round(p.outTimeMs / 1000)}s`;
-              }
-            });
-            break;
+          const label = `[job ${job.id} ${project.name}]`;
 
-          case "transcribe":
-            if (!project.source) throw new Error("not ingested");
-            await transcribeProject(projectId, (p) => {
-              job.progress = `transcribe: ${JSON.stringify(p).slice(0, 60)}`;
-            });
-            break;
+          switch (step) {
+            case "ingest":
+              console.log(`${label} ingest start`);
+              await ingestProject(projectId, (p) => {
+                if ("outTimeMs" in p) {
+                  job.progress = `ingest: ${Math.round(p.outTimeMs / 1000)}s`;
+                }
+              });
+              console.log(`${label} ingest done`);
+              break;
 
-          case "render": {
-            if (!project.transcript) throw new Error("not transcribed");
-            const style = renderStyle ?? "bold";
-            // Skip if already rendered with this style
-            if (project.rendered?.includes(style)) {
-              job.progress = `render: skipped (${style} already done)`;
+            case "transcribe": {
+              const fresh = getProject(projectId);
+              if (!fresh?.source) throw new Error("not ingested");
+              console.log(`${label} transcribe start`);
+              await transcribeProject(
+                projectId,
+                (p) => {
+                  job.progress = `transcribe: ${JSON.stringify(p).slice(0, 60)}`;
+                },
+                transcribeOptions,
+              );
+              console.log(`${label} transcribe done`);
               break;
             }
-            const { renderProjectFfmpeg } = await import("./renderFfmpeg.js");
-            await renderProjectFfmpeg(projectId, style, (p) => {
-              if ("percent" in p) {
-                job.progress = `render: ${(p as { percent: number }).percent}%`;
+
+            case "render": {
+              const fresh = getProject(projectId);
+              if (!fresh?.transcript) throw new Error("not transcribed");
+              const style = renderStyle ?? "bold";
+              if (fresh.rendered?.includes(style)) {
+                job.progress = `render: skipped (${style} already done)`;
+                console.log(`${label} render skipped (${style} already done)`);
+                break;
               }
-            });
-            // Track rendered style
-            const { updateProject } = await import("./projects.js");
-            const fresh = getProject(projectId);
-            if (fresh) {
-              const rendered = new Set(fresh.rendered ?? []);
-              rendered.add(style);
-              updateProject(projectId, { rendered: [...rendered] });
+              console.log(`${label} render start (${style})`);
+              const { renderProjectFfmpeg } = await import("./renderFfmpeg.js");
+              await renderProjectFfmpeg(projectId, style, (p) => {
+                if ("percent" in p) {
+                  job.progress = `render: ${(p as { percent: number }).percent}%`;
+                }
+              });
+              const { updateProject } = await import("./projects.js");
+              const after = getProject(projectId);
+              if (after) {
+                const rendered = new Set(after.rendered ?? []);
+                rendered.add(style);
+                updateProject(projectId, { rendered: [...rendered] });
+              }
+              console.log(`${label} render done (${style})`);
+              break;
             }
-            break;
           }
-        }
+        });
       }
       job.status = "done";
       job.progress = undefined;
@@ -115,14 +138,14 @@ export const submitJob = (
     } catch (e) {
       job.status = "error";
       job.error = (e as Error).message;
+      console.error(`[job ${job.id}] error: ${job.error}`);
     }
     job.finishedAt = new Date().toISOString();
-  });
+  })();
 
   return job;
 };
 
-// Convenience: submit jobs for multiple projects at once
 export const submitBatch = (
   projectIds: string[],
   steps: JobStep[],
@@ -130,5 +153,13 @@ export const submitBatch = (
 ): Job[] =>
   projectIds.map((pid) => submitJob(pid, steps, renderStyle));
 
-export const queueSize = () => queue.size;
-export const queuePending = () => queue.pending;
+export const queueSize = () => ingestQueue.size + transcribeQueue.size;
+export const queuePending = () => ingestQueue.pending + transcribeQueue.pending;
+
+export const queueStats = () => ({
+  ingest: { size: ingestQueue.size, pending: ingestQueue.pending },
+  transcribe: {
+    size: transcribeQueue.size,
+    pending: transcribeQueue.pending,
+  },
+});

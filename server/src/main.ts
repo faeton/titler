@@ -16,12 +16,12 @@ import { transcribeProject, type TranscribeProgress } from "./transcribe.js";
 import { runFaceTrack, type FaceTrackProgress } from "./crop.js";
 import {
   submitJob,
-  submitBatch,
   getJob,
   listJobs,
   clearFinishedJobs,
   queueSize,
   queuePending,
+  queueStats,
   type JobStep,
 } from "./jobs.js";
 import { rmSync } from "node:fs";
@@ -197,17 +197,21 @@ app.patch<{ Params: { id: string }; Body: { words: unknown } }>(
     if (!Array.isArray(words))
       return reply.code(400).send({ error: "words_array_required" });
 
-    // Merge: keep original timings, update text
-    const updated = project.transcript.words.map((orig, i) => {
-      const patch = words[i];
-      if (patch && typeof patch === "object" && "text" in patch) {
-        return { ...orig, text: String((patch as { text: string }).text) };
-      }
-      return orig;
-    });
+    // Full replacement: accept arbitrary length (inserts & deletes).
+    // Each word must have numeric start/end and non-empty text.
+    const updated: { start: number; end: number; text: string; prob?: number }[] = [];
+    for (const w of words) {
+      if (!w || typeof w !== "object") continue;
+      const start = Number((w as { start: unknown }).start);
+      const end = Number((w as { end: unknown }).end);
+      const text = String((w as { text: unknown }).text ?? "").trim();
+      if (!Number.isFinite(start) || !Number.isFinite(end) || text.length === 0) continue;
+      const probRaw = (w as { prob: unknown }).prob;
+      const prob = typeof probRaw === "number" ? probRaw : undefined;
+      updated.push(prob === undefined ? { start, end, text } : { start, end, text, prob });
+    }
 
     const newTranscript = { ...project.transcript, words: updated };
-    updateProject(project.id, { transcript: newTranscript });
 
     // Also write the standalone transcript.json for render
     const { writeFileSync } = await import("node:fs");
@@ -216,7 +220,6 @@ app.patch<{ Params: { id: string }; Body: { words: unknown } }>(
       JSON.stringify(newTranscript, null, 2),
     );
 
-    // Mark project as edited
     updateProject(project.id, { transcript: newTranscript, edited: true });
 
     return { ok: true, words: updated.length };
@@ -350,6 +353,7 @@ app.get("/jobs", async () => ({
   jobs: listJobs(),
   queueSize: queueSize(),
   pending: queuePending(),
+  queues: queueStats(),
 }));
 
 app.get<{ Params: { id: string } }>(
@@ -368,26 +372,73 @@ app.post("/jobs/clear", async () => {
 
 // Submit a single project job
 app.post<{
-  Body: { projectId: string; steps: string[]; style?: string };
+  Body: {
+    projectId: string;
+    steps: string[];
+    style?: string;
+    transcribeOptions?: {
+      language?: string;
+      initialPrompt?: string;
+      backend?: "mlx" | "faster";
+      model?: string;
+    };
+  };
 }>("/jobs", async (req, reply) => {
-  const { projectId, steps, style } = req.body ?? {};
+  const { projectId, steps, style, transcribeOptions } = req.body ?? {};
   if (!projectId || !Array.isArray(steps) || steps.length === 0)
     return reply.code(400).send({ error: "projectId_and_steps_required" });
   const project = getProject(projectId);
   if (!project) return reply.code(404).send({ error: "project_not_found" });
-  const job = submitJob(projectId, steps as JobStep[], style);
+  const job = submitJob(
+    projectId,
+    steps as JobStep[],
+    style,
+    transcribeOptions,
+  );
   return job;
 });
 
-// Submit a batch of jobs
+// Submit a batch of jobs. Per-project, auto-prepend prerequisite steps
+// so hitting "batch render" on a mix of untranscribed + transcribed
+// projects runs ingest/transcribe where needed instead of erroring.
+const STEP_ORDER: JobStep[] = ["ingest", "transcribe", "render"];
+
 app.post<{
   Body: { projectIds: string[]; steps: string[]; style?: string };
 }>("/jobs/batch", async (req, reply) => {
   const { projectIds, steps, style } = req.body ?? {};
   if (!Array.isArray(projectIds) || !Array.isArray(steps) || steps.length === 0)
     return reply.code(400).send({ error: "projectIds_and_steps_required" });
-  const jobs = submitBatch(projectIds, steps as JobStep[], style);
-  return { jobs };
+
+  const requested = steps as JobStep[];
+  const targetIdx = Math.max(
+    ...requested.map((s) => STEP_ORDER.indexOf(s)),
+  );
+  if (targetIdx < 0)
+    return reply.code(400).send({ error: "invalid_steps" });
+
+  const jobs = [];
+  const skipped: string[] = [];
+  for (const projectId of projectIds) {
+    const project = getProject(projectId);
+    if (!project) {
+      skipped.push(projectId);
+      continue;
+    }
+    const needed: JobStep[] = [];
+    for (let i = 0; i <= targetIdx; i++) {
+      const step = STEP_ORDER[i];
+      if (step === "ingest" && !project.source) needed.push(step);
+      else if (step === "transcribe" && !project.transcript) needed.push(step);
+      else if (step === "render") needed.push(step);
+    }
+    if (needed.length === 0) {
+      skipped.push(projectId);
+      continue;
+    }
+    jobs.push(submitJob(projectId, needed, style));
+  }
+  return { jobs, skipped };
 });
 
 // Batch import from inbox: create projects + queue ingest+transcribe (+ optional render)
