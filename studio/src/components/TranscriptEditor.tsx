@@ -1,62 +1,76 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Transcript } from "../api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Transcript, Word } from "../api";
+import { FONTS, fmtTime, type Tok } from "../tokens";
 
 /**
- * Interactive transcript editor.
- *
- * - Click a word → seek video there (no auto-play)
- * - Double-click a word → pause video + edit text
- * - Hover a word → × appears to remove it
- * - Double-click the gap between two words → insert a new word
- * - During playback, current word highlights yellow
- * - Low-confidence words (prob < 0.7) shown in red
- * - Enter to save edit, Escape to cancel
+ * Editorial prose transcript:
+ *  - Words grouped into sentences; each sentence gets a clickable timestamp gutter
+ *  - Click word → seek + briefly play ~1s (via onSeek)
+ *  - Double-click word → edit inline with amber focus ring
+ *  - Low-confidence words show a dotted warn underline
+ *  - Hovering reveals an × to remove the word
+ *  - Double-click the thin gap between two words → insert at playhead time
  */
 
-type Props = {
+type EditTarget =
+  | { kind: "word"; index: number }
+  | { kind: "gap"; afterIndex: number };
+
+export const TranscriptEditor: React.FC<{
+  tok: Tok;
   transcript: Transcript;
   currentTime: number;
   onSeek: (time: number) => void;
   onPause: () => void;
   onEdit: (index: number, newText: string) => void;
   onDelete: (index: number) => void;
+  onDeleteLine?: (indices: number[]) => void;
   onInsert: (afterIndex: number, text: string) => void;
-};
-
-type EditTarget =
-  | { kind: "word"; index: number }
-  | { kind: "gap"; afterIndex: number };
-
-export const TranscriptEditor: React.FC<Props> = ({
-  transcript,
-  currentTime,
-  onSeek,
-  onPause,
-  onEdit,
-  onDelete,
-  onInsert,
-}) => {
+}> = ({ tok, transcript, currentTime, onSeek, onPause, onEdit, onDelete, onDeleteLine, onInsert }) => {
   const [editing, setEditing] = useState<EditTarget | null>(null);
-  const [editText, setEditText] = useState("");
+  const [draft, setDraft] = useState("");
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [hoverLine, setHoverLine] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const isEditing = editing !== null;
+  const words = transcript.words;
 
-  const currentWordIdx = transcript.words.findIndex(
-    (w) => currentTime >= w.start && currentTime < w.end,
-  );
+  const activeIdx = useMemo(() => {
+    for (let i = 0; i < words.length; i++) {
+      if (currentTime >= words[i].start && currentTime < words[i].end) return i;
+    }
+    for (let i = words.length - 1; i >= 0; i--) {
+      if (currentTime >= words[i].start) return i;
+    }
+    return -1;
+  }, [currentTime, words]);
+
+  // Group words into sentences by punctuation.
+  const sentences = useMemo(() => {
+    const out: { words: Word[]; idx: number[] }[] = [];
+    let cur: { words: Word[]; idx: number[] } = { words: [], idx: [] };
+    words.forEach((w, i) => {
+      cur.words.push(w);
+      cur.idx.push(i);
+      if (/[.!?]$/.test(w.text) || (w.end - w.start > 0 && w.text.length > 0 && i === words.length - 1)) {
+        out.push(cur);
+        cur = { words: [], idx: [] };
+      }
+    });
+    if (cur.words.length > 0) out.push(cur);
+    return out;
+  }, [words]);
 
   useEffect(() => {
     if (isEditing) return;
-    if (currentWordIdx >= 0 && containerRef.current) {
-      const el = containerRef.current.querySelector(
-        `[data-word-idx="${currentWordIdx}"]`,
-      );
-      if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    }
-  }, [currentWordIdx, isEditing]);
+    if (activeIdx < 0 || !containerRef.current) return;
+    const el = containerRef.current.querySelector(
+      `[data-word-idx="${activeIdx}"]`,
+    );
+    if (el) (el as HTMLElement).scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [activeIdx, isEditing]);
 
   useEffect(() => {
     if (editing !== null) {
@@ -71,186 +85,234 @@ export const TranscriptEditor: React.FC<Props> = ({
     (idx: number) => {
       onPause();
       setEditing({ kind: "word", index: idx });
-      setEditText(transcript.words[idx].text);
+      setDraft(words[idx].text);
     },
-    [transcript.words, onPause],
+    [words, onPause],
   );
 
   const startInsert = useCallback(
     (afterIndex: number) => {
       onPause();
       setEditing({ kind: "gap", afterIndex });
-      setEditText("");
+      setDraft("");
     },
     [onPause],
   );
 
-  const commitEdit = useCallback(() => {
+  const commit = useCallback(() => {
     if (!editing) return;
-    const trimmed = editText.trim();
+    const trimmed = draft.trim();
     if (editing.kind === "word") {
-      if (trimmed && trimmed !== transcript.words[editing.index].text) {
+      if (trimmed && trimmed !== words[editing.index].text) {
         onEdit(editing.index, trimmed);
       }
     } else {
       if (trimmed) onInsert(editing.afterIndex, trimmed);
     }
     setEditing(null);
-  }, [editing, editText, transcript.words, onEdit, onInsert]);
+  }, [editing, draft, words, onEdit, onInsert]);
 
-  const cancelEdit = useCallback(() => {
-    setEditing(null);
-  }, []);
+  const cancel = useCallback(() => setEditing(null), []);
 
-  const handleClick = useCallback(
-    (idx: number) => {
-      if (isEditing) return;
-      onSeek(transcript.words[idx].start);
-    },
-    [isEditing, onSeek, transcript.words],
-  );
-
-  const renderEditInput = (keyPrefix: string, width: number) => (
+  const renderInput = (w: number) => (
     <input
-      key={keyPrefix}
       ref={inputRef}
       type="text"
-      value={editText}
-      onChange={(e) => setEditText(e.target.value)}
-      onBlur={commitEdit}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
       onKeyDown={(e) => {
-        if (e.key === "Enter") commitEdit();
-        if (e.key === "Escape") cancelEdit();
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") cancel();
       }}
       style={{
         font: "inherit",
-        fontSize: 13,
-        fontWeight: 600,
-        color: "#facc15",
-        background: "#2a2a33",
-        border: "1px solid #facc15",
-        borderRadius: 4,
-        padding: "2px 6px",
+        color: tok.ink,
+        border: 0,
+        outline: `2px solid ${tok.accent}`,
+        background: tok.accentSoft,
+        padding: "1px 4px",
+        borderRadius: 3,
+        width: `${Math.max(w, 2)}ch`,
         margin: "0 2px",
-        width,
-        outline: "none",
       }}
     />
   );
 
-  const renderGap = (afterIndex: number) => {
-    const isEditingHere =
-      editing?.kind === "gap" && editing.afterIndex === afterIndex;
-    if (isEditingHere) {
-      return renderEditInput(
-        `gap-${afterIndex}-edit`,
-        Math.max(40, editText.length * 9),
-      );
-    }
-    return (
-      <span
-        key={`gap-${afterIndex}`}
-        onDoubleClick={() => startInsert(afterIndex)}
-        title="double-click to insert a word"
-        style={{
-          display: "inline-block",
-          width: 6,
-          height: 18,
-          verticalAlign: "middle",
-          cursor: "text",
-          borderRadius: 2,
-        }}
-      />
-    );
-  };
-
   return (
-    <div ref={containerRef} style={{ lineHeight: 2.2 }}>
-      {renderGap(-1)}
-      {transcript.words.map((word, i) => {
-        const isCurrent = i === currentWordIdx && !isEditing;
-        const isEditingThis =
-          editing?.kind === "word" && editing.index === i;
-        const lowProb = (word.prob ?? 1) < 0.7;
-        const isHovered = hoverIdx === i && !isEditing;
-
-        const wordNode = isEditingThis
-          ? renderEditInput(
-              `${i}-edit`,
-              Math.max(40, editText.length * 9),
-            )
-          : (
+    <div
+      ref={containerRef}
+      style={{
+        fontFamily: FONTS.display,
+        fontWeight: 400,
+        fontSize: "clamp(18px, 1.35vw, 22px)",
+        lineHeight: 1.55,
+        letterSpacing: -0.1,
+        color: tok.ink,
+        maxWidth: 720,
+      }}
+    >
+      {sentences.map((sent, si) => {
+        const firstT = sent.words[0].start;
+        const lineHovered = hoverLine === si && !isEditing;
+        return (
+          <p
+            key={si}
+            style={{ margin: "0 0 16px", position: "relative" }}
+            onMouseEnter={() => setHoverLine(si)}
+            onMouseLeave={() =>
+              setHoverLine((h) => (h === si ? null : h))
+            }
+          >
+            <span
+              onClick={() => onSeek(firstT)}
+              style={{
+                fontFamily: FONTS.mono,
+                fontSize: 10,
+                color: tok.ink3,
+                marginRight: 12,
+                fontWeight: 500,
+                cursor: "pointer",
+                verticalAlign: "0.2em",
+              }}
+            >
+              {fmtTime(firstT)}
+            </span>
+            {onDeleteLine && (
               <span
-                key={`${i}-${word.start}`}
-                data-word-idx={i}
-                onClick={() => handleClick(i)}
-                onDoubleClick={() => startEditWord(i)}
-                onMouseEnter={() => setHoverIdx(i)}
-                onMouseLeave={() =>
-                  setHoverIdx((h) => (h === i ? null : h))
-                }
-                title={`${word.start.toFixed(2)}s – ${word.end.toFixed(2)}s${lowProb ? ` (prob ${word.prob})` : ""}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteLine(sent.idx);
+                  setHoverLine(null);
+                  setHoverIdx(null);
+                }}
+                title="remove this line"
                 style={{
-                  position: "relative",
-                  display: "inline-block",
-                  padding: "1px 4px",
-                  margin: "0 1px",
-                  borderRadius: 3,
-                  fontSize: 13,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 14,
+                  height: 14,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: tok.paper,
+                  background: tok.err,
+                  borderRadius: "50%",
                   cursor: "pointer",
-                  transition: "background 0.15s, color 0.15s",
-                  background: isCurrent
-                    ? "#facc15"
-                    : lowProb
-                      ? "rgba(239, 68, 68, 0.15)"
-                      : "transparent",
-                  color: isCurrent
-                    ? "#000"
-                    : lowProb
-                      ? "#ef4444"
-                      : "#e6e6e6",
-                  fontWeight: isCurrent ? 700 : 400,
-                  textDecoration: lowProb ? "underline dotted" : "none",
+                  fontFamily: FONTS.body,
+                  verticalAlign: "0.2em",
+                  marginRight: 10,
+                  lineHeight: 1,
+                  visibility: lineHovered ? "visible" : "hidden",
                 }}
               >
-                {word.text}
-                {isHovered && (
-                  <span
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(i);
-                      setHoverIdx(null);
-                    }}
-                    onDoubleClick={(e) => e.stopPropagation()}
-                    title="remove this word"
-                    style={{
-                      position: "absolute",
-                      top: -6,
-                      right: -4,
-                      width: 14,
-                      height: 14,
-                      lineHeight: "13px",
-                      textAlign: "center",
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: "#fff",
-                      background: "#ef4444",
-                      borderRadius: "50%",
-                      cursor: "pointer",
-                      boxShadow: "0 0 0 1.5px #1a1a22",
-                    }}
-                  >
-                    ×
-                  </span>
-                )}
+                ×
               </span>
-            );
+            )}
+            {sent.idx.map((gi, wi) => {
+              const w = words[gi];
+              const isActive = gi === activeIdx && !isEditing;
+              const low = (w.prob ?? 1) < 0.75;
+              const isEditingWord = editing?.kind === "word" && editing.index === gi;
+              const isEditingGap = editing?.kind === "gap" && editing.afterIndex === gi;
+              const isHovered = hoverIdx === gi && !isEditing;
+              const isLast = wi === sent.idx.length - 1;
 
-        return (
-          <span key={`w-${i}`}>
-            {wordNode}
-            {renderGap(i)}
-          </span>
+              return (
+                <span key={`${gi}-${w.start}`} style={{ whiteSpace: "normal" }}>
+                  {isEditingWord ? (
+                    renderInput(Math.max(draft.length, 2))
+                  ) : (
+                    <span
+                      data-word-idx={gi}
+                      onClick={() => !isEditing && onSeek(w.start)}
+                      onDoubleClick={() => startEditWord(gi)}
+                      onMouseEnter={() => setHoverIdx(gi)}
+                      onMouseLeave={() =>
+                        setHoverIdx((h) => (h === gi ? null : h))
+                      }
+                      title={`${fmtTime(w.start)} · conf ${Math.round((w.prob ?? 1) * 100)}%`}
+                      style={{
+                        position: "relative",
+                        zIndex: isHovered ? 3 : "auto",
+                        color: isActive ? tok.accentInk : tok.ink,
+                        background: isActive ? tok.accentSoft : "transparent",
+                        padding: isActive ? "1px 4px" : 0,
+                        borderRadius: isActive ? 3 : 0,
+                        borderBottom: low
+                          ? `1.5px dotted ${tok.warn}`
+                          : "none",
+                        cursor: "pointer",
+                        transition:
+                          "background 0.12s ease, color 0.12s ease",
+                        display: "inline-block",
+                      }}
+                      onMouseOver={(e) => {
+                        if (!isActive)
+                          (e.currentTarget as HTMLElement).style.background =
+                            tok.sel;
+                      }}
+                      onMouseOut={(e) => {
+                        if (!isActive)
+                          (e.currentTarget as HTMLElement).style.background =
+                            "transparent";
+                      }}
+                    >
+                      {w.text}
+                      {isHovered && (
+                        <span
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(gi);
+                            setHoverIdx(null);
+                          }}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                          title="remove this word"
+                          style={{
+                            position: "absolute",
+                            top: -4,
+                            right: -4,
+                            width: 14,
+                            height: 14,
+                            lineHeight: "12px",
+                            textAlign: "center",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: tok.paper,
+                            background: tok.err,
+                            borderRadius: "50%",
+                            cursor: "pointer",
+                            boxShadow: `0 0 0 1.5px ${tok.paper}`,
+                            fontFamily: FONTS.body,
+                            zIndex: 4,
+                          }}
+                        >
+                          ×
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  {isEditingGap ? (
+                    renderInput(Math.max(draft.length, 2))
+                  ) : (
+                    !isLast && (
+                      <span
+                        onDoubleClick={() => startInsert(gi)}
+                        title="double-click to insert a word"
+                        style={{
+                          display: "inline-block",
+                          width: "0.35em",
+                          cursor: "text",
+                        }}
+                      >
+                        {" "}
+                      </span>
+                    )
+                  )}
+                </span>
+              );
+            })}
+          </p>
         );
       })}
     </div>

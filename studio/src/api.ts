@@ -82,10 +82,13 @@ export type Project = {
 };
 
 const api = async <T>(path: string, init?: RequestInit): Promise<T> => {
-  const res = await fetch(`/api${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
+  // Only advertise JSON content-type when there's actually a body — Fastify
+  // rejects empty bodies that claim to be JSON (FST_ERR_CTP_EMPTY_JSON_BODY).
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
+  if (init?.body != null && headers["Content-Type"] === undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+  const res = await fetch(`/api${path}`, { ...init, headers });
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`${res.status} ${path}: ${body}`);
