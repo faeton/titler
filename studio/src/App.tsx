@@ -130,6 +130,21 @@ const wordsToSrt = (words: { start: number; end: number; text: string }[]): stri
     .join("\n");
 };
 
+// Mirror server/src/renderFfmpeg.ts — `${YYYYMMDD}_${HHMMSS}` from recording time
+// (UTC). This is the basename that shows up in out/, so surfacing it in the
+// project list lets users correlate to their rendered files.
+const outputPrefix = (project: Project): string => {
+  const iso =
+    project.source?.original.createdAt ?? project.createdAt;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "unknown";
+  return d
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace("T", "_")
+    .slice(0, 15);
+};
+
 const buildTitle = (words: { text: string }[]): string => {
   const text = words.map((w) => w.text).join(" ");
   const end = text.search(/[.!?]/);
@@ -1702,24 +1717,35 @@ const ProjectRow: React.FC<{
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
-            fontSize: 12.5,
+            fontFamily: FONTS.mono,
+            fontSize: 11,
             color: active ? tok.ink : tok.ink2,
             fontWeight: active ? 500 : 400,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
+            letterSpacing: -0.1,
           }}
+          title={outputPrefix(project)}
         >
-          {new Date(rec).toLocaleDateString("en", {
-            month: "short",
-            day: "numeric",
-          })}{" "}
-          · {Math.max(0, Math.round(dur))}s
+          {outputPrefix(project)}
+          {rendered ? (
+            <span style={{ color: tok.ink4 }}>
+              _{project.rendered!.length === 1
+                ? project.rendered![0].replace(/^.*_/, "").replace(/\.mp4$/, "")
+                : "*"}
+              .mp4
+            </span>
+          ) : (
+            <span style={{ color: tok.ink4 }}>
+              {" "}
+              · {Math.max(0, Math.round(dur))}s
+            </span>
+          )}
         </div>
         <div
           style={{
-            fontFamily: FONTS.mono,
-            fontSize: 9.5,
+            fontSize: 10.5,
             color: tok.ink4,
             marginTop: 1,
             overflow: "hidden",
@@ -1727,7 +1753,13 @@ const ProjectRow: React.FC<{
             whiteSpace: "nowrap",
           }}
         >
-          {project.name}
+          {new Date(rec).toLocaleString("en", {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+          {rendered && ` · ${Math.max(0, Math.round(dur))}s`}
         </div>
       </div>
       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
