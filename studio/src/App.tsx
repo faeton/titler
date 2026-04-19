@@ -184,6 +184,9 @@ export const App = () => {
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
   const [outputsKey, setOutputsKey] = useState(0);
   const [batchOpen, setBatchOpen] = useState(false);
+  const [selectedProjects, setSelectedProjects] = useState<Set<string>>(
+    new Set(),
+  );
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const playerRef = useRef<PlayerRef>(null);
@@ -681,6 +684,69 @@ export const App = () => {
     }
   };
 
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedProjects(new Set()), []);
+
+  const onBatchRenderSelected = async () => {
+    if (selectedProjects.size === 0) return;
+    const ids = [...selectedProjects];
+    setSelectedProjects(new Set());
+    try {
+      const { jobs: newJobs, skipped } = await submitBatchRender(
+        ids,
+        captionStyle,
+      );
+      const skipMsg = skipped.length ? ` (${skipped.length} skipped)` : "";
+      showToast(`queued ${newJobs.length} renders · ${captionStyle}${skipMsg}`);
+      const { jobs: fresh } = await listJobs();
+      setJobs(fresh);
+    } catch (e) {
+      showToast(`batch render failed: ${(e as Error).message}`);
+    }
+  };
+
+  const onBatchArchiveSelected = async () => {
+    if (selectedProjects.size === 0) return;
+    const ids = [...selectedProjects];
+    setSelectedProjects(new Set());
+    for (const id of ids) {
+      try {
+        await archiveProject(id);
+      } catch (e) {
+        pushLog(`archive error: ${(e as Error).message}`);
+      }
+    }
+    if (current && ids.includes(current.id)) setCurrent(null);
+    await refresh();
+    showToast(`archived ${ids.length} project${ids.length === 1 ? "" : "s"}`);
+  };
+
+  const onBatchDeleteSelected = async () => {
+    if (selectedProjects.size === 0) return;
+    const n = selectedProjects.size;
+    if (!confirm(`Delete ${n} project${n === 1 ? "" : "s"}?`)) return;
+    const ids = [...selectedProjects];
+    setSelectedProjects(new Set());
+    for (const id of ids) {
+      try {
+        await deleteProject(id);
+      } catch (e) {
+        pushLog(`delete error: ${(e as Error).message}`);
+      }
+    }
+    if (current && ids.includes(current.id)) setCurrent(null);
+    await refresh();
+    showToast(`deleted ${n} project${n === 1 ? "" : "s"}`);
+  };
+
   const renderAllReady = async () => {
     const ready = projects
       .filter((p) => p.transcript && !(p.rendered?.length ?? 0))
@@ -1003,6 +1069,8 @@ export const App = () => {
               currentId={current?.id}
               jobs={jobs}
               onPick={onPickProject}
+              selected={selectedProjects}
+              onToggleSelect={toggleSelect}
             />
           )}
           {todayProjects.length > 0 && earlierProjects.length > 0 && (
@@ -1016,6 +1084,8 @@ export const App = () => {
               currentId={current?.id}
               jobs={jobs}
               onPick={onPickProject}
+              selected={selectedProjects}
+              onToggleSelect={toggleSelect}
             />
           )}
           {projects.length === 0 && (
@@ -1567,6 +1637,108 @@ export const App = () => {
         />
       )}
 
+      {selectedProjects.size > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            left: "50%",
+            transform: "translateX(-50%)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "8px 10px 8px 18px",
+            background: tok.ink,
+            color: tok.paper,
+            borderRadius: 999,
+            boxShadow: "0 12px 32px -12px rgba(0,0,0,0.45)",
+            fontFamily: FONTS.body,
+            zIndex: 90,
+          }}
+        >
+          <div style={{ fontSize: 12.5, fontWeight: 500 }}>
+            {selectedProjects.size} selected
+          </div>
+          <div
+            style={{
+              width: 1,
+              height: 20,
+              background: "rgba(255,255,255,0.15)",
+              margin: "0 4px",
+            }}
+          />
+          <Btn
+            tok={tok}
+            variant="accent"
+            size="sm"
+            icon="render"
+            onClick={onBatchRenderSelected}
+          >
+            Render ({captionStyle})
+          </Btn>
+          <button
+            onClick={onBatchArchiveSelected}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 10px",
+              height: 28,
+              borderRadius: 999,
+              color: tok.paper,
+              background: "transparent",
+              border: `1px solid rgba(255,255,255,0.2)`,
+              fontFamily: FONTS.body,
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: "pointer",
+            }}
+          >
+            <Icon name="archive" size={13} />
+            Archive
+          </button>
+          <button
+            onClick={onBatchDeleteSelected}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 10px",
+              height: 28,
+              borderRadius: 999,
+              color: "oklch(0.78 0.14 25)",
+              background: "transparent",
+              border: `1px solid rgba(255,255,255,0.2)`,
+              fontFamily: FONTS.body,
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: "pointer",
+            }}
+          >
+            <Icon name="trash" size={13} />
+            Delete
+          </button>
+          <button
+            onClick={clearSelection}
+            title="Clear selection"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 28,
+              height: 28,
+              borderRadius: 999,
+              color: tok.paper,
+              background: "transparent",
+              cursor: "pointer",
+              opacity: 0.7,
+            }}
+          >
+            <Icon name="x" size={14} />
+          </button>
+        </div>
+      )}
+
       {toast && (
         <div
           style={{
@@ -1636,7 +1808,9 @@ const ProjectGroup: React.FC<{
   currentId?: string;
   jobs: Job[];
   onPick: (id: string) => void;
-}> = ({ tok, title, projects, currentId, jobs, onPick }) => (
+  selected: Set<string>;
+  onToggleSelect: (id: string) => void;
+}> = ({ tok, title, projects, currentId, jobs, onPick, selected, onToggleSelect }) => (
   <div>
     <div
       style={{
@@ -1659,6 +1833,8 @@ const ProjectGroup: React.FC<{
         active={currentId === p.id}
         jobs={jobs}
         onPick={() => onPick(p.id)}
+        selected={selected.has(p.id)}
+        onToggleSelect={() => onToggleSelect(p.id)}
       />
     ))}
   </div>
@@ -1670,8 +1846,11 @@ const ProjectRow: React.FC<{
   active: boolean;
   jobs: Job[];
   onPick: () => void;
-}> = ({ tok, project, active, jobs, onPick }) => {
+  selected: boolean;
+  onToggleSelect: () => void;
+}> = ({ tok, project, active, jobs, onPick, selected, onToggleSelect }) => {
   const [hover, setHover] = useState(false);
+  const [avatarHover, setAvatarHover] = useState(false);
   const device = project.source?.original.device ?? "";
   const rec = project.source?.original.createdAt ?? project.createdAt;
   const dur = project.source?.original.duration ?? 0;
@@ -1701,19 +1880,69 @@ const ProjectRow: React.FC<{
         padding: "7px 10px",
         marginLeft: -10,
         marginRight: -10,
-        borderLeft: `2px solid ${active ? tok.accent : "transparent"}`,
-        background: active ? tok.card : hover ? tok.sunk : "transparent",
+        borderLeft: `2px solid ${active ? tok.accent : selected ? tok.accentSoft : "transparent"}`,
+        background: selected
+          ? tok.accentSoft
+          : active
+            ? tok.card
+            : hover
+              ? tok.sunk
+              : "transparent",
         cursor: "pointer",
         transition: "all 0.12s ease",
         borderRadius: 4,
         opacity: project.archived ? 0.55 : 1,
       }}
     >
-      <DeviceIcon
-        device={device}
-        size={12}
-        color={active ? tok.ink2 : tok.ink3}
-      />
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleSelect();
+        }}
+        onMouseEnter={(e) => {
+          e.stopPropagation();
+          setAvatarHover(true);
+        }}
+        onMouseLeave={() => setAvatarHover(false)}
+        title={selected ? "Deselect" : "Select for batch"}
+        style={{
+          width: 20,
+          height: 20,
+          display: "grid",
+          placeItems: "center",
+          border: `1px solid ${selected ? tok.accent : avatarHover ? tok.ink3 : "transparent"}`,
+          background: selected
+            ? tok.accent
+            : avatarHover
+              ? tok.card
+              : "transparent",
+          borderRadius: 999,
+          color: selected
+            ? tok.accentFg
+            : active
+              ? tok.ink2
+              : tok.ink3,
+          cursor: "pointer",
+          transition: "all 0.12s ease",
+          flexShrink: 0,
+        }}
+      >
+        {selected ? (
+          <Icon name="check" size={12} />
+        ) : avatarHover ? (
+          <span
+            style={{
+              width: 10,
+              height: 10,
+              border: `1.5px solid ${tok.ink3}`,
+              borderRadius: 999,
+            }}
+          />
+        ) : (
+          <DeviceIcon device={device} size={12} color="currentColor" />
+        )}
+      </button>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
