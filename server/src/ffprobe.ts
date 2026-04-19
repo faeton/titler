@@ -12,7 +12,7 @@ export const probe = (inputPath: string): Promise<ProbeInfo> =>
       "-select_streams",
       "v:0",
       "-show_entries",
-      "stream=width,height,r_frame_rate,codec_name:format=duration:format_tags=creation_time,com.apple.quicktime.model,com.apple.quicktime.software,com.apple.quicktime.make",
+      "stream=width,height,r_frame_rate,codec_name:format=duration:format_tags=creation_time,com.apple.quicktime.creationdate,com.apple.quicktime.model,com.apple.quicktime.software,com.apple.quicktime.make",
       "-of",
       "json",
       inputPath,
@@ -49,7 +49,10 @@ export const probe = (inputPath: string): Promise<ProbeInfo> =>
           fps: Number.isFinite(fps) ? fps : 30,
           codec: String(stream.codec_name ?? "unknown"),
           duration: Number(format.duration ?? 0),
-          createdAt: tags.creation_time ?? null,
+          createdAt:
+            tags["com.apple.quicktime.creationdate"] ??
+            tags.creation_time ??
+            null,
           device: tags["com.apple.quicktime.model"] ?? null,
           make: tags["com.apple.quicktime.make"] ?? null,
           software: tags["com.apple.quicktime.software"] ?? null,

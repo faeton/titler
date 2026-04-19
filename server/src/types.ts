@@ -89,6 +89,7 @@ export type Project = {
   edited?: boolean;
   rendered?: string[];
   archived?: boolean;
+  createdAtMigrated?: boolean;
 };
 
 export const VIDEO_WIDTH = 1080;

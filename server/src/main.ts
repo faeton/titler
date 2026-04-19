@@ -12,6 +12,7 @@ import {
   listProjects,
 } from "./projects.js";
 import { ingestProject, type IngestProgress } from "./ingest.js";
+import { probe } from "./ffprobe.js";
 import { transcribeProject, type TranscribeProgress } from "./transcribe.js";
 import { runFaceTrack, type FaceTrackProgress } from "./crop.js";
 import {
@@ -621,6 +622,38 @@ if (existsSync(studioDist)) {
 const PORT = Number(process.env.TITLER_STUDIO_PORT ?? 7777);
 const HOST = process.env.TITLER_STUDIO_HOST ?? "0.0.0.0";
 
+// One-time backfill: older projects cached `source.original.createdAt` from
+// the `creation_time` tag, which Ray-Ban glasses set to the export/sync time
+// rather than the actual recording time. Re-probe originals and replace with
+// `com.apple.quicktime.creationdate` when it differs.
+const migrateCreatedAt = async () => {
+  const projects = listProjects({ includeArchived: true });
+  for (const p of projects) {
+    if (p.createdAtMigrated) continue;
+    if (!p.source?.original) continue;
+    if (!existsSync(p.originalFile)) {
+      updateProject(p.id, { createdAtMigrated: true });
+      continue;
+    }
+    try {
+      const fresh = await probe(p.originalFile);
+      const updated: Partial<typeof p> = { createdAtMigrated: true };
+      if (fresh.createdAt && fresh.createdAt !== p.source.original.createdAt) {
+        updated.source = {
+          ...p.source,
+          original: { ...p.source.original, createdAt: fresh.createdAt },
+        };
+        app.log.info(
+          `migrate createdAt ${p.id}: ${p.source.original.createdAt} → ${fresh.createdAt}`,
+        );
+      }
+      updateProject(p.id, updated);
+    } catch (e) {
+      app.log.warn(`migrate createdAt ${p.id}: ${(e as Error).message}`);
+    }
+  }
+};
+
 app.listen({ port: PORT, host: HOST }).then(async () => {
   const os = await import("node:os");
   let localIp = "127.0.0.1";
@@ -638,4 +671,7 @@ app.listen({ port: PORT, host: HOST }).then(async () => {
   app.log.info(`  work/: ${WORK_DIR}`);
   app.log.info(`  out/: ${OUT_DIR}`);
   startInboxWatcher();
+  migrateCreatedAt().catch((e) =>
+    app.log.error(`createdAt migration failed: ${(e as Error).message}`),
+  );
 });
