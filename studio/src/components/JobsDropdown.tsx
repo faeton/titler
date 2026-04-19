@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Job, Project } from "../api";
 import { FONTS, type Tok } from "../tokens";
 import { Pill, SectionLabel } from "../primitives";
@@ -23,14 +24,40 @@ export const JobsDropdown: React.FC<{
 }> = ({ tok, jobs, projects, onClear }) => {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState<{ left: number; bottom: number } | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t)) return;
+      if (popRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const measure = () => {
+      const r = btnRef.current!.getBoundingClientRect();
+      setAnchor({
+        left: r.left,
+        bottom: window.innerHeight - r.top,
+      });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
   }, [open]);
 
   const running = jobs.filter((j) => j.status === "running").length;
@@ -63,6 +90,7 @@ export const JobsDropdown: React.FC<{
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
       <button
+        ref={btnRef}
         onClick={() => setOpen(!open)}
         title="Jobs"
         style={{
@@ -124,13 +152,13 @@ export const JobsDropdown: React.FC<{
           {open ? "▲" : "▼"}
         </span>
       </button>
-      {open && (
+      {open && anchor && createPortal(
         <div
+          ref={popRef}
           style={{
-            position: "absolute",
-            bottom: "100%",
-            left: 0,
-            marginBottom: 6,
+            position: "fixed",
+            left: anchor.left,
+            bottom: anchor.bottom + 6,
             width: 340,
             maxHeight: 420,
             overflowY: "auto",
@@ -138,7 +166,7 @@ export const JobsDropdown: React.FC<{
             border: `1px solid ${tok.rule}`,
             borderRadius: 8,
             padding: 10,
-            zIndex: 30,
+            zIndex: 200,
             boxShadow: "0 12px 32px -12px rgba(0,0,0,0.25)",
           }}
         >
@@ -256,7 +284,8 @@ export const JobsDropdown: React.FC<{
               );
             })}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
