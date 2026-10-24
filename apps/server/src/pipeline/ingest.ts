@@ -2,7 +2,7 @@ import { cp, mkdtemp, rm } from "node:fs/promises";
 import type { Artifact } from "@titler/core";
 import { abs, artifactKey, ensureArtifact, errMsg, findArtifact, type Ctx } from "../context.js";
 import type { JobContext } from "../jobs.js";
-import { PROXY_LONG, proxyArgs, thumbArgs, wav16Args, wav48Args, type Encoder } from "../media/commands.js";
+import { encoderName, PROXY_LONG, proxyArgs, thumbArgs, wav16Args, wav48Args, type Encoder } from "../media/commands.js";
 import { probeFile, type ProbeX } from "../media/probe.js";
 import { run } from "../media/run.js";
 import type { ProjectRow } from "../store.js";
@@ -31,21 +31,25 @@ export const requireArtifact = (ctx: Ctx, p: ProjectRow, kind: keyof typeof keys
   return a;
 };
 
-export const encoder = (ctx: Ctx, hw = true): Encoder => ({ hw: hw && ctx.cfg.ffmpegHw !== null, vaapiDevice: ctx.cfg.vaapiDevice });
+export const encoder = (ctx: Ctx, hw = true): Encoder => ({
+  kind: hw && ctx.cfg.ffmpegHw !== null ? ctx.cfg.hwEncoder : "software",
+  vaapiDevice: ctx.cfg.vaapiDevice,
+});
 
-/** Run an ffmpeg encode on VAAPI if available, falling back to libx264 on failure. */
+/** Run an ffmpeg encode on the hardware encoder if available, falling back to libx264 on failure. */
 export const withEncoderFallback = async <T>(ctx: Ctx, j: JobContext, fn: (enc: Encoder, ff: string) => Promise<T>): Promise<T & { encoder: string }> => {
   const enc = encoder(ctx);
-  if (enc.hw) {
+  if (enc.kind !== "software") {
+    const name = encoderName(enc.kind);
     try {
-      return { ...(await fn(enc, ctx.cfg.ffmpegHw!)), encoder: "h264_vaapi" };
+      return { ...(await fn(enc, ctx.cfg.ffmpegHw!)), encoder: name };
     } catch (e) {
       j.throwIfCancelled();
-      ctx.log.warn({ job: j.job.id, err: errMsg(e).slice(0, 600) }, "VAAPI encode failed, falling back to libx264");
-      j.progress(null, "VAAPI failed, retrying with libx264");
+      ctx.log.warn({ job: j.job.id, err: errMsg(e).slice(0, 600) }, `${name} encode failed, falling back to libx264`);
+      j.progress(null, `${name} failed, retrying with libx264`);
     }
   }
-  return { ...(await fn({ ...enc, hw: false }, ctx.cfg.ffmpeg)), encoder: "libx264" };
+  return { ...(await fn({ ...enc, kind: "software" }, ctx.cfg.ffmpeg)), encoder: "libx264" };
 };
 
 export const ingest = async (ctx: Ctx, j: JobContext): Promise<Record<string, unknown>> => {

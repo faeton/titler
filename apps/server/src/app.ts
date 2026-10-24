@@ -17,6 +17,7 @@ import {
 } from "@titler/core";
 import { loadConfig, type Config } from "./config.js";
 import { abs, artifactUrl, type Ctx } from "./context.js";
+import { encoderName } from "./media/commands.js";
 import { openDb } from "./db.js";
 import { Scheduler } from "./jobs.js";
 import { compare, enhance } from "./pipeline/audio.js";
@@ -325,7 +326,11 @@ export const buildApp = async (opts: BuildOpts = {}): Promise<App> => {
     handler: async (req: FastifyRequest<{ Params: { file: string } }>, reply) =>
       sendFile(req, reply, join(cfg.fontsDir, basename(req.params.file)), { cache: "public, max-age=86400" }),
   });
-  fastify.get("/api/health", async () => ({ ok: true, vaapi: cfg.ffmpegHw !== null }));
+  fastify.get("/api/health", async () => ({
+    ok: true,
+    vaapi: cfg.ffmpegHw !== null && cfg.hwEncoder === "vaapi",
+    encoder: cfg.ffmpegHw !== null ? encoderName(cfg.hwEncoder) : "libx264",
+  }));
 
   // ---- web app (SPA) ----
   fastify.setNotFoundHandler(async (req, reply) => {

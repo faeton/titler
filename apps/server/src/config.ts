@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { accessSync, constants, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -13,8 +14,10 @@ export interface Config {
   host: string;
   port: number;
   ffmpeg: string;
-  /** VAAPI-capable ffmpeg wrapper; null when VAAPI is unavailable/disabled. */
+  /** ffmpeg used for hardware encodes (VAAPI wrapper on n5, plain ffmpeg for VideoToolbox); null = libx264 only. */
   ffmpegHw: string | null;
+  /** Which hardware encoder `ffmpegHw` drives (probed at startup). */
+  hwEncoder: "vaapi" | "videotoolbox";
   ffprobe: string;
   vaapiDevice: string;
   fontsDir: string;
@@ -33,6 +36,17 @@ const home = homedir();
 const canUse = (path: string): boolean => {
   try {
     accessSync(path, constants.R_OK | constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** One-frame h264_videotoolbox encode: the encoder can be listed yet have no hardware session. */
+const videotoolboxWorks = (ffmpeg: string): boolean => {
+  try {
+    execFileSync(ffmpeg, ["-hide_banner", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "color=s=64x64:d=0.1",
+      "-frames:v", "1", "-c:v", "h264_videotoolbox", "-allow_sw", "0", "-f", "null", "-"], { stdio: "ignore", timeout: 10_000 });
     return true;
   } catch {
     return false;
@@ -59,13 +73,18 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env, overrides: Part
     const p = resolve(home, ".local/bin", name);
     return existsSync(p) ? p : name;
   };
+  const ffmpeg = env.TITLER_FFMPEG ?? localFf("ffmpeg");
+  // VAAPI (n5) wins when present; VideoToolbox is the macOS path. TITLER_VAAPI=0 /
+  // TITLER_VIDEOTOOLBOX=0 force libx264.
+  const vtOk = !hwOk && process.platform === "darwin" && env.TITLER_VIDEOTOOLBOX !== "0" && videotoolboxWorks(ffmpeg);
   const cfg: Config = {
     repoRoot,
     dataDir: resolve(env.TITLER_DATA ?? resolve(repoRoot, "data")),
     host: env.TITLER_HOST ?? "127.0.0.1",
     port: Number(env.TITLER_PORT ?? 8772),
-    ffmpeg: env.TITLER_FFMPEG ?? localFf("ffmpeg"),
-    ffmpegHw: hwOk ? hwPath : null,
+    ffmpeg,
+    ffmpegHw: hwOk ? hwPath : vtOk ? ffmpeg : null,
+    hwEncoder: hwOk ? "vaapi" : "videotoolbox",
     ffprobe: env.TITLER_FFPROBE ?? localFf("ffprobe"),
     vaapiDevice,
     fontsDir: resolve(repoRoot, "assets/fonts"),

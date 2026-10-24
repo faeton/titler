@@ -3,7 +3,7 @@ import { buildApp } from "./app.js";
 const app = await buildApp();
 const { host, port } = app.ctx.cfg;
 app.ctx.log.info(
-  { dataDir: app.ctx.cfg.dataDir, vaapi: app.ctx.cfg.ffmpegHw !== null, ffmpeg: app.ctx.cfg.ffmpeg },
+  { dataDir: app.ctx.cfg.dataDir, hwEncoder: app.ctx.cfg.ffmpegHw !== null ? app.ctx.cfg.hwEncoder : null, ffmpeg: app.ctx.cfg.ffmpeg },
   "titler server starting",
 );
 

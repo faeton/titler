@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { compileCues, DEFAULT_FRAMING, DEFAULT_STYLE, docFromHypothesis, toAss } from "@titler/core";
+import { loadConfig } from "../src/config.js";
 import { artifactKey, canonical } from "../src/context.js";
 import { cropRect, filterPath, fitLong, framingGraph, mixArgs, outputSize, parseLoudnorm, proxyArgs, renderArgs } from "../src/media/commands.js";
 import { parseProbe } from "../src/media/probe.js";
@@ -10,8 +11,9 @@ import { pickExcerpts } from "../src/pipeline/audio.js";
 import { stamp } from "../src/pipeline/render.js";
 import { HERE, rmDir, tmpDir } from "./helpers.js";
 
-const HW = { hw: true, vaapiDevice: "/dev/dri/renderD128" };
-const SW = { hw: false, vaapiDevice: "/dev/dri/renderD128" };
+const HW = { kind: "vaapi", vaapiDevice: "/dev/dri/renderD128" } as const;
+const VT = { kind: "videotoolbox", vaapiDevice: "/dev/dri/renderD128" } as const;
+const SW = { kind: "software", vaapiDevice: "/dev/dri/renderD128" } as const;
 const FONTS = resolve(HERE, "../../../assets/fonts");
 
 describe("artifact keys", () => {
@@ -78,6 +80,15 @@ describe("ffmpeg commands", () => {
     expect(sw).toContain("format=yuv420p");
   });
 
+  it("proxy: CPU decode + CPU scale + h264_videotoolbox, no hwupload", () => {
+    const vt = proxyArgs("/s.mov", "/p.mp4", { width: 1376, height: 1840 }, VT).join(" ");
+    expect(vt).not.toContain("-hwaccel");
+    expect(vt).not.toContain("vaapi");
+    expect(vt).not.toContain("hwupload");
+    expect(vt).toContain("-vf scale=538:720:flags=bicubic,setsar=1,format=nv12");
+    expect(vt).toContain("-c:v h264_videotoolbox -allow_sw 0 -profile:v high -b:v 1800k -maxrate 2500k");
+  });
+
   it("render: one decode, split into captioned + clean, ass with fontsdir, variant audio", () => {
     const args = renderArgs(
       {
@@ -103,6 +114,19 @@ describe("ffmpeg commands", () => {
     expect(s).toContain("-map [vc] -map 1:a:0 -c:v h264_vaapi -rc_mode CQP -qp 21 -profile:v high -c:a aac");
     expect(s).toContain("-map [vk] -map 1:a:0");
     expect(args.at(-1)).toBe("/o/clean.mp4");
+  });
+
+  it("render on VideoToolbox: CPU libass, nv12 tail, constant-quality h264_videotoolbox", () => {
+    const args = renderArgs(
+      { src: "/s.mov", audio: null, hasSourceAudio: true, probe: { width: 1376, height: 1840 }, framing: DEFAULT_FRAMING, out: { w: 1080, h: 1920 }, captioned: { path: "/o/cap.mp4", ass: "/o/subs.ass" }, clean: null, fontsDir: "/f" },
+      VT,
+    );
+    const s = args.join(" ");
+    expect(args[args.indexOf("-filter_complex") + 1]).toBe(
+      "[0:v]crop=1036:1840:170:0,scale=1080:1920:flags=lanczos,setsar=1[base];[base]ass=filename='/o/subs.ass':fontsdir='/f',format=nv12[vc]",
+    );
+    expect(s).not.toContain("-hwaccel");
+    expect(s).toContain("-map [vc] -map 0:a:0 -c:v h264_videotoolbox -allow_sw 0 -profile:v high -q:v 65 -c:a aac");
   });
 
   it("render without variant maps source audio; libx264 path", () => {
@@ -158,10 +182,11 @@ describe("excerpts", () => {
 });
 
 describe("libass burn-in (real ffmpeg)", () => {
-  const ff = `${process.env.HOME}/.local/bin/ffmpeg`;
+  const ff = loadConfig().ffmpeg; // ~/.local/bin/ffmpeg on n5, PATH (ffmpeg-full) on the Mac
+  const hasLibass = / ass +V->V/.test(spawnSync(ff, ["-hide_banner", "-filters"], { encoding: "utf8" }).stdout ?? "");
   const dir = tmpDir();
   afterAll(() => rmDir(dir));
-  it.skipIf(!existsSync(ff))("resolves Montserrat Bold from assets/fonts for Cyrillic captions", () => {
+  it.skipIf(!hasLibass)("resolves Montserrat Bold from assets/fonts for Cyrillic captions", () => {
     const doc = docFromHypothesis({ id: "h", words: [{ text: "Привіт,", start: 0, end: 400 }, { text: "Самоа!", start: 450, end: 900 }] });
     const assPath = join(dir, "s.ass");
     writeFileSync(assPath, toAss(compileCues(doc, DEFAULT_STYLE, 1000), { width: 1080, height: 1920, style: DEFAULT_STYLE }));

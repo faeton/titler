@@ -48,7 +48,7 @@ const view = (id: string) => call<ProjectView>("GET", `/api/projects/${id}`);
 const main = async () => {
   const size = (await stat(FILE)).size;
   log(`server ${BASE}, file ${basename(FILE)} (${(size / 1e6).toFixed(1)} MB)`);
-  const health = await call<{ vaapi: boolean }>("GET", "/api/health");
+  const health = await call<{ vaapi: boolean; encoder?: string }>("GET", "/api/health");
 
   // ---- upload, interrupted after the first chunk and resumed ----
   const fh = await open(FILE, "r");
@@ -126,7 +126,7 @@ const main = async () => {
   const renderS = (Date.now() - tR) / 1000;
 
   console.log("\n==== e2e summary ====");
-  console.log(`server         ${BASE} (vaapi available: ${health.vaapi})`);
+  console.log(`server         ${BASE} (encoder: ${health.encoder ?? (health.vaapi ? "h264_vaapi" : "libx264")})`);
   console.log(`project        ${pid} "${v.project.name}"`);
   console.log(`upload         ${(size / 1e6).toFixed(1)} MB in ${uploadS.toFixed(1)}s, chunks of ${CHUNK / 1e6} MB, resumed once`);
   console.log(`ingest         ${ingestJob?.status} encoder=${ingestJob?.result?.encoder ?? "-"}`);

@@ -1,16 +1,25 @@
 import type { Framing, Probe } from "@titler/core";
 
 // Pure ffmpeg argument builders (unit-tested). Paths are passed in absolute.
-// VAAPI recipe: bench/REPORT-gpu.md §4 — VAAPI decode, CPU crop/scale/libass,
+// VAAPI recipe (n5): bench/REPORT-gpu.md §4 — VAAPI decode, CPU crop/scale/libass,
 // hwupload, h264_vaapi CQP. We let ffmpeg download decoded frames itself (no
 // -hwaccel_output_format vaapi) so the CPU autorotate filter still applies and
 // the output carries no display-matrix side data. scale_vaapi is broken on
 // this iGPU, so all scaling is on the CPU.
+// VideoToolbox (macOS): CPU decode, CPU filters, nv12 frames to h264_videotoolbox
+// (no hwupload — VT takes system-memory frames). No VT decode: on M3 Max, VT HEVC
+// decode + frame download is 3.5× slower than CPU decode (10.2 s vs 2.9 s, 64 s clip).
+// -q:v 65 ≈ libx264 crf 18 (VMAF 99.43 vs 99.45, 17 vs 20 Mbps) in half the time.
+
+export type EncoderKind = "vaapi" | "videotoolbox" | "software";
 
 export interface Encoder {
-  hw: boolean;
+  kind: EncoderKind;
   vaapiDevice: string;
 }
+
+export const encoderName = (kind: EncoderKind): string =>
+  kind === "vaapi" ? "h264_vaapi" : kind === "videotoolbox" ? "h264_videotoolbox" : "libx264";
 
 export const even = (n: number): number => Math.max(2, Math.round(n / 2) * 2);
 
@@ -21,23 +30,32 @@ export const fitLong = (w: number, h: number, max: number): { w: number; h: numb
 };
 
 const hwInput = (enc: Encoder): string[] =>
-  enc.hw ? ["-init_hw_device", `vaapi=va:${enc.vaapiDevice}`, "-filter_hw_device", "va", "-hwaccel", "vaapi", "-hwaccel_device", "va"] : [];
+  enc.kind === "vaapi"
+    ? ["-init_hw_device", `vaapi=va:${enc.vaapiDevice}`, "-filter_hw_device", "va", "-hwaccel", "vaapi", "-hwaccel_device", "va"]
+    : [];
 
 /** Video filter tail that hands frames to the encoder. */
-const encTail = (enc: Encoder): string => (enc.hw ? "format=nv12,hwupload" : "format=yuv420p");
+const encTail = (enc: Encoder): string =>
+  enc.kind === "vaapi" ? "format=nv12,hwupload" : enc.kind === "videotoolbox" ? "format=nv12" : "format=yuv420p";
 
 // The proxy is streamed to a phone over the tailnet, often via a relay: keep it
 // small (~2 Mbps, 720p) with a 1 s GOP so seeks and word taps start quickly.
 const PROXY_RATE = ["-b:v", "1800k", "-maxrate", "2500k", "-bufsize", "4M", "-g", "30"];
 
-const videoCodec = (enc: Encoder, quality: "proxy" | "final"): string[] =>
-  quality === "proxy"
-    ? enc.hw
+// VT on Apple Silicon: -q:v is constant quality (1–100); -allow_sw 0 so a missing
+// hardware session fails loudly (→ libx264 fallback) instead of a slow software VT.
+const VT = ["-c:v", "h264_videotoolbox", "-allow_sw", "0", "-profile:v", "high"];
+
+const videoCodec = (enc: Encoder, quality: "proxy" | "final"): string[] => {
+  if (enc.kind === "vaapi")
+    return quality === "proxy"
       ? ["-c:v", "h264_vaapi", "-rc_mode", "VBR", ...PROXY_RATE, "-profile:v", "high"]
-      : ["-c:v", "libx264", "-preset", "veryfast", "-crf", "26", ...PROXY_RATE, "-profile:v", "high", "-pix_fmt", "yuv420p"]
-    : enc.hw
-      ? ["-c:v", "h264_vaapi", "-rc_mode", "CQP", "-qp", "21", "-profile:v", "high"]
-      : ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-profile:v", "high", "-pix_fmt", "yuv420p"];
+      : ["-c:v", "h264_vaapi", "-rc_mode", "CQP", "-qp", "21", "-profile:v", "high"];
+  if (enc.kind === "videotoolbox") return quality === "proxy" ? [...VT, ...PROXY_RATE] : [...VT, "-q:v", "65"];
+  return quality === "proxy"
+    ? ["-c:v", "libx264", "-preset", "veryfast", "-crf", "26", ...PROXY_RATE, "-profile:v", "high", "-pix_fmt", "yuv420p"]
+    : ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-profile:v", "high", "-pix_fmt", "yuv420p"];
+};
 
 const common = ["-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats"];
 
