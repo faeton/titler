@@ -1,8 +1,8 @@
 # Titler v2 on the MacBook (m3max) — handoff
 
 Titler must run fully on the laptop as well as on n5 (owner request 2026-10-24; see
-"Two runtimes" in [PLAN-v2.md](PLAN-v2.md)). v2 was built and tested on n5 only. Nothing
-below has been run on macOS yet.
+"Two runtimes" in [PLAN-v2.md](PLAN-v2.md)). v2 was built on n5; the Mac port is done
+(see "Done on the Mac" below).
 
 ## Status when handed off (2026-10-24)
 
@@ -75,6 +75,49 @@ and don't add cloud calls. Cloud providers stay key-gated, and the keys aren't s
 
 ---
 
+## Done on the Mac (2026-10-24)
+
+1. **setup.sh** works (idempotent). Homebrew core `ffmpeg` has no libass → one ffmpeg on the
+   box: `ffmpeg-full`, linked (`brew link --force ffmpeg-full`). `grep -q` under `pipefail`
+   SIGPIPE'd the capability checks — fixed.
+2. **Encoder**: `vaapi | videotoolbox | software`, probed at startup (one-frame
+   `h264_videotoolbox -allow_sw 0` encode), `/api/health` → `encoder`. VT path = CPU decode +
+   CPU filters + `h264_videotoolbox`. No VT *decode*: HEVC VT decode + frame download is 3.5×
+   slower than CPU decode on M3 Max. `-q:v 65` ≈ libx264 crf 18 (VMAF 99.43 vs 99.45).
+3. **ASR**: `mlx-whisper` provider added (shared guards/schema) but **opt-in, not the Mac
+   default**: mlx-whisper has no beam search, and greedy turbo translates the English tail of
+   video-34238 into Russian and appends «Спасибо.» to 34442 (faster-whisper `beam_size=1` does
+   the same — it is the decoding, not MLX). faster-whisper beam 5 on the M3 Max CPU matches n5
+   (same English tail) and is faster than n5. Revisit if mlx-whisper gets beam search
+   (or try whisper.cpp + Metal, which has it).
+4. **torch devices**: aligner on Apple Silicon = `w2v_ru` fp32 on **CPU** (2× faster than
+   int8/qnnpack, bit-identical to n5 fp32; identical aligned/unconfirmed decisions to n5 q8 on
+   707 windows incl. 101 fake words — int8 itself differs between fbgemm and qnnpack). MPS:
+   GigaAM slower, w2v conv1d unsupported. MossFormer2: **MPS** (ClearVoice's own choice), 2×
+   faster, mps-vs-cpu difference at the same level as Mac-cpu vs n5-cpu.
+5. **Paths**: `TITLER_SCRATCH` = `/mnt/flash/scratch` if present, else `~/.cache/titler`;
+   HF/torch keep library defaults off n5; DFN binary by platform. n5 paths verified unchanged.
+6. `pnpm test` (core 14, server 35 — libass test now runs on the Mac too, web 11),
+   `workers/smoke.py` (0 failed), `apps/server/scripts/e2e.ts --compare` (22 s total),
+   `apps/web/scripts/smoke-server.mjs` + `smoke.mjs` (headless mobile Chromium) all pass.
+   Not done: the cycle from the phone over Tailscale (needs the phone; see below).
+
+Phone access to the laptop: `pnpm --filter @titler/web build && pnpm --filter @titler/server start`,
+then `tailscale serve --bg --https=8772 http://127.0.0.1:8772` on the Mac.
+
 ## Measured on the Mac
 
-_(fill in)_
+M3 Max (12P+4E), `TITLER_THREADS=8`, warm models. n5 = Ryzen AI / 890M numbers from the bench
+reports and n5 runs of the same scripts. Clips: 34238 33 s, 34442 30 s, 34585 64 s.
+
+| stage | n5 | Mac |
+|---|---|---|
+| ASR faster-whisper turbo, beam 5 (238/442/585) | 11.3 / 15.0 / 22.9 s | **8.3 / 8.7 / 14.2 s** (CPU) |
+| ASR mlx-whisper turbo, greedy (opt-in) | — | 2.6 / 1.3 / 7.0 s (GPU) |
+| align precompute, boundary + verifier | q8: 1.7+0.8 / 1.5+0.7 / 3.4+1.6 s | fp32: 1.2+0.4 / 1.0+0.3 / 2.2+0.7 s |
+| align window (cached / uncached) | 2–3 ms / 0.30 s | 1.5–2 ms / 0.23 s |
+| MF2 speech+background (442 / 585) | 11.3 s / — | **6.3 / 11.0 s** (MPS); CPU 12.8 / 23.1 s |
+| DFN3 (442) | 2.8 s | 2.1–2.7 s |
+| final encode 585, crop→1080×1920 | VAAPI 7.1 s, x264 veryfast 14.9 s | **VT 5.0 s**, x264 veryfast 9.4 s |
+| proxy 585 (720p) | — | VT 3.1 s, x264 3.3 s (decode-bound) |
+| e2e 34442: upload → ASR → edit → align → compare → render | — | 22.2 s (render captioned+clean 5.0 s) |

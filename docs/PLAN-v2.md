@@ -101,9 +101,9 @@ well as on n5. Everything host-specific stays behind config:
 | Concern | n5 (Linux, Radeon 890M) | m3max (macOS, Apple Silicon) |
 |---|---|---|
 | Video encode | VAAPI `h264_vaapi` via `ffmpeg-hw` | `h264_videotoolbox` |
-| Whisper | faster-whisper (CT2 CPU / ROCm container) | **mlx-whisper** turbo on the GPU (v1 measured ~6 s per 60 s) |
-| GigaAM / aligner / MossFormer2 | torch CPU / ROCm | torch **MPS** (verify per model; CPU fallback) |
-| Workers | `bench/envs/*` venvs, later ROCm container | one `uv` venv per role under `~/.cache/titler` |
+| Whisper | faster-whisper (CT2 CPU / ROCm container) | faster-whisper on CPU (beam 5); mlx-whisper opt-in — greedy-only, loses code-switched English (docs/mac.md) |
+| GigaAM / aligner / MossFormer2 | torch CPU / ROCm | aligner + GigaAM on CPU (w2v fp32), MossFormer2 on MPS (measured, docs/mac.md) |
+| Workers | `bench/envs/*` venvs, later ROCm container | same `bench/envs/*` venvs (deploy/mac/setup.sh); caches in `~/.cache/titler` |
 | Access | tailnet `https://n5.<tailnet>.ts.net:8772` | `localhost` (+ LAN/tailnet for the phone) |
 
 Encoder choice is a capability probe (`hw` = vaapi | videotoolbox | none), ASR backend per
