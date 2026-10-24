@@ -14,11 +14,15 @@ need() { command -v "$1" >/dev/null || { echo "missing: $1 ($2)"; exit 1; }; }
 need brew "https://brew.sh"
 need uv "brew install uv"
 need pnpm "corepack enable && corepack prepare pnpm@10.29.3 --activate"
-# ffmpeg with libass + videotoolbox (homebrew-ffmpeg tap builds include both)
-if ! ffmpeg -hide_banner -filters 2>/dev/null | grep -q " ass "; then
-  echo "ffmpeg without libass: brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg"; exit 1
+# ffmpeg with libass + videotoolbox: core `ffmpeg` has no libass, `ffmpeg-full` (keg-only) does.
+# One ffmpeg on the box: brew uninstall ffmpeg && brew install ffmpeg-full && brew link --force ffmpeg-full
+# (capture first: `grep -q` under pipefail SIGPIPEs ffmpeg and fails the check)
+filters=$(ffmpeg -hide_banner -filters 2>/dev/null || true)
+encoders=$(ffmpeg -hide_banner -encoders 2>/dev/null || true)
+if ! grep -q " ass " <<<"$filters"; then
+  echo "ffmpeg without libass: brew uninstall ffmpeg; brew install ffmpeg-full && brew link --force ffmpeg-full"; exit 1
 fi
-ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_videotoolbox || echo "WARN: no h264_videotoolbox encoder"
+grep -q h264_videotoolbox <<<"$encoders" || echo "WARN: no h264_videotoolbox encoder"
 
 mk() { [ -x "$E/$1/bin/python" ] || uv venv --seed -p 3.11 "$E/$1"; }
 
