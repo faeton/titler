@@ -32,7 +32,7 @@ const EMPTY: TranscriptDoc = { paragraphs: [] };
 
 // ---- ASR ---------------------------------------------------------------------------
 
-export const LOCAL_ASR = ["faster-whisper", "gigaam", "parakeet"];
+export const LOCAL_ASR = ["faster-whisper", "mlx-whisper", "gigaam", "parakeet"];
 
 const int = (v: unknown): number => Math.max(0, Math.round(Number(v) || 0));
 

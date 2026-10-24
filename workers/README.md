@@ -11,7 +11,7 @@ cd <repo> && PYTHONPATH=workers <venv>/bin/python -m titler_worker --role <role>
 | role | venv (n5, CPU) | ops | models |
 |---|---|---|---|
 | `analyze` | `bench/envs/align-main` | `analyze` | Silero VAD (silero-vad 6.x, bundled weights) |
-| `asr` | `bench/envs/asr-fw` | `asr` | faster-whisper `large-v3-turbo` int8; onnx-asr `gigaam-v3-e2e-rnnt` / `nemo-parakeet-tdt-0.6b-v3` |
+| `asr` | `bench/envs/asr-fw` | `asr` | faster-whisper `large-v3-turbo` int8; mlx-whisper `large-v3-turbo` (Mac, opt-in); onnx-asr `gigaam-v3-e2e-rnnt` / `nemo-parakeet-tdt-0.6b-v3` |
 | `align` | `bench/envs/align-main` | `align_precompute`, `align_window`, `align_forget` | wav2vec2-xlsr-53-russian int8 (boundaries) + GigaAM-v3 CTC (verifier) |
 | `enhance` | `bench/envs/enh-cv` | `enhance` | DeepFilterNet3 (`deep-filter` 0.5.6 binary), MossFormer2_SE_48K (ClearVoice) |
 
@@ -41,7 +41,9 @@ residual lag (GCC-PHAT). Output + per-role stderr logs: `$TITLER_SMOKE_OUT`
 | `TITLER_THREADS` | 8 | torch / CT2 / onnxruntime / rayon threads |
 | `TITLER_SCRATCH` | `/mnt/flash/scratch` if it exists, else `~/.cache/titler` | titler cache root (onnx-asr, ClearVoice, GigaAM, smoke) |
 | `HF_HOME`, `TORCH_HOME`, `UV_CACHE_DIR` | n5: `/mnt/flash/scratch/{hf-cache,torch-hub,uv-cache}`; elsewhere library defaults | set with `setdefault`, n5 layout only |
+| `TITLER_ASR_PROVIDER` | `faster-whisper` | provider when the request has none (and `--preload`) |
 | `TITLER_FW_MODEL` | `large-v3-turbo` | faster-whisper model (request `model` overrides) |
+| `TITLER_MLX_MODEL` | `large-v3-turbo` | mlx-whisper model (short name or HF repo) |
 | `TITLER_FW_COMPUTE` / `TITLER_FW_BEAM` | `int8` / 5 | |
 | `TITLER_FW_HALLU_SILENCE` | 2.0 | `hallucination_silence_threshold` (s) |
 | `TITLER_FW_CONDITION_PREV` | 1 | `condition_on_previous_text` (see deviations); request key `condition_on_previous_text` overrides |

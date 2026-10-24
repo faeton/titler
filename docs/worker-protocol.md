@@ -51,6 +51,10 @@ All times are **integer milliseconds**. All audio paths are absolute.
     added «Продолжение следует...»; the degenerate-output retry flips it to False),
     `word_timestamps=True`. Text keeps punctuation attached to words. Extra result keys:
     `langProb`, `dropped` (segments removed by speech-rate / VAD-overlap guards), `degenerate`.
+  - `provider: "mlx-whisper"` (Apple Silicon only, opt-in): same options, guards and output
+    schema as faster-whisper, model `mlx-community/whisper-large-v3-turbo`, but greedy
+    decoding (no beam search) — it translates the English speaker in 34238, so it is not
+    the default on the Mac either. No `langProb`.
   - `provider: "gigaam"` / `"parakeet"` (onnx-asr) optional; `asr-onnx` venv.
   - Sanity check: if the output looks degenerate (compression ratio > 2.4, or the same token
     repeated > 8×) retry once and set `"retried": true`.

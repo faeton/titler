@@ -83,6 +83,8 @@ const projectSummary = (ctx: Ctx, p: ProjectRow): ProjectSummary => {
   };
 };
 
+const appleSilicon = process.platform === "darwin" && process.arch === "arm64";
+
 export const providers = (env: NodeJS.ProcessEnv = process.env): ProviderInfo[] => {
   const cloud = (id: string, envKey: string, kind: ProviderInfo["kind"], models: string[], wordTimestamps: boolean): ProviderInfo => ({
     id,
@@ -95,6 +97,10 @@ export const providers = (env: NodeJS.ProcessEnv = process.env): ProviderInfo[] 
   });
   return [
     { id: "faster-whisper", kind: "asr", local: true, enabled: true, models: ["large-v3-turbo", "large-v3"], wordTimestamps: true },
+    // Apple GPU, greedy-only: faster but loses code-switched English (bench: video-34238), so opt-in.
+    appleSilicon
+      ? { id: "mlx-whisper", kind: "asr", local: true, enabled: true, models: ["large-v3-turbo", "large-v3"], wordTimestamps: true }
+      : { id: "mlx-whisper", kind: "asr", local: true, enabled: false, reason: "needs Apple Silicon", models: ["large-v3-turbo"], wordTimestamps: true },
     { id: "gigaam", kind: "asr", local: true, enabled: true, models: ["gigaam-v3-e2e-rnnt"], wordTimestamps: true },
     { id: "parakeet", kind: "asr", local: true, enabled: true, models: ["nemo-parakeet-tdt-0.6b-v3"], wordTimestamps: true },
     cloud("elevenlabs", "ELEVENLABS_API_KEY", "asr", ["scribe_v2"], true),

@@ -25,7 +25,7 @@ grep -q h264_videotoolbox <<<"$encoders" || echo "WARN: no h264_videotoolbox enc
 
 mk() { [ -x "$E/$1/bin/python" ] || uv venv --seed -p 3.11 "$E/$1"; }
 
-# asr: mlx-whisper (Apple GPU) + faster-whisper (CPU fallback, same code path as n5) + onnx-asr (GigaAM/parakeet)
+# asr: faster-whisper (default, CPU, same code path as n5) + mlx-whisper (Apple GPU, opt-in) + onnx-asr (GigaAM/parakeet)
 mk asr-fw
 uv pip install -p "$E/asr-fw/bin/python" mlx-whisper faster-whisper "onnx-asr[cpu,hub]" onnxruntime soundfile numpy psutil
 

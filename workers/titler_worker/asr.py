@@ -1,8 +1,10 @@
-"""role asr: faster-whisper (default) and onnx-asr providers (gigaam, parakeet).
+"""role asr: faster-whisper (default), mlx-whisper (opt-in, Apple Silicon) and onnx-asr
+providers (gigaam, parakeet).
 
 Venv: asr-fw (faster-whisper; onnx-asr 0.12 was added to it so all providers work in the
-default process). Every provider's library is imported lazily: if it is missing in the
-current venv the request fails with a clear, non-retryable error naming the venv to use.
+default process; on the Mac it also has mlx-whisper). Every provider's library is imported
+lazily: if it is missing in the current venv the request fails with a clear, non-retryable
+error naming the venv to use.
 """
 from __future__ import annotations
 
@@ -25,6 +27,15 @@ VAD_GUARD = os.environ.get("TITLER_FW_VAD_GUARD", "1") != "0"
 # fw-turbo-auto-novad config) gets both right. Default True; the degenerate-output retry
 # flips it to False (the classic remedy for repetition loops). Override per request.
 FW_COND_PREV = os.environ.get("TITLER_FW_CONDITION_PREV", "1") != "0"
+# mlx-whisper runs whisper on the Apple GPU (CT2/faster-whisper is CPU-only on macOS), 2-3x
+# faster than faster-whisper on M3 Max, but greedy only (no beam search in mlx-whisper 0.4).
+# Greedy turbo translates the English speaker of video-34238 into Russian and appends
+# "Спасибо." to video-34442 — faster-whisper with beam_size=1 does the same, so it is the
+# decoding, not MLX. Hence opt-in; faster-whisper (beam 5) stays the default on the Mac too.
+MLX_DEFAULT = os.environ.get("TITLER_MLX_MODEL", "large-v3-turbo")
+MLX_REPOS = {"large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
+             "large-v3": "mlx-community/whisper-large-v3-mlx"}
+DEFAULT_PROVIDER = os.environ.get("TITLER_ASR_PROVIDER", "faster-whisper")
 ONNX_DEFAULTS = {"gigaam": "gigaam-v3-e2e-rnnt", "parakeet": "nemo-parakeet-tdt-0.6b-v3"}
 ONNX_LOCAL = os.environ.get("TITLER_ONNX_ASR_DIR", scratch("hf-cache/onnx-asr", "onnx-asr"))
 ONNX_LANG = {"gigaam": "ru", "parakeet": None}  # GigaAM-v3 is Russian-only
@@ -38,7 +49,7 @@ def loaded_models():
 
 
 def preload():
-    _fw(FW_DEFAULT)
+    _mlx(MLX_DEFAULT) if DEFAULT_PROVIDER == "mlx-whisper" else _fw(FW_DEFAULT)
 
 
 # --- degenerate-output check ---------------------------------------------------------
@@ -99,6 +110,47 @@ def _overlap(a0, a1, regions) -> float:
     return sum(max(0.0, min(a1, r1) - max(a0, r0)) for r0, r1 in regions)
 
 
+def _whisper_words(segs, wav: str, dur: float, progress, base: float, span: float):
+    """Whisper segments -> (words, dropped), shared by faster-whisper and mlx-whisper.
+    `segs` yields (id, start, end, text, [(word, start, end, probability)]) in seconds."""
+    regions = _speech_regions(wav) if VAD_GUARD else None
+    words, dropped = [], []
+    dur = max(dur, 1e-3)
+    for sid, s0, s1, text, ws in segs:
+        progress(base + span * min(1.0, s1 / dur), "decoding")
+        sw = [w for w in ws if w[0].strip()]
+        if not sw:
+            continue
+        seg_d = max(s1 - s0, 1e-3)
+        nv = len(_VOWELS.findall(text.lower()))
+        if nv >= 4 and nv / seg_d > 15:  # >15 syllables/s cannot be speech
+            dropped.append({"text": text.strip(), "start": ms(s0), "end": ms(s1),
+                            "reason": "implausible-rate"})
+            continue
+        if regions is not None:
+            if _overlap(s0, s1, regions) / seg_d < 0.1:
+                # text over audio Silero calls non-speech: the classic whisper
+                # hallucination ("Продолжение следует...", "Субтитры ...")
+                dropped.append({"text": text.strip(), "start": ms(s0), "end": ms(s1),
+                                "reason": "no-speech"})
+                continue
+        for word, w0, w1, prob in sw:
+            t = word.strip()  # punctuation stays attached ("Привет," / "так.")
+            if (words and words[-1].get("_seg") == sid and not word[:1].isspace()
+                    and (not t[0].isalnum() or words[-1]["text"].endswith("-"))):
+                # continuation piece without a leading space ("как" + "-то", "по" + "-другому")
+                p = words[-1]
+                p["text"] += t
+                p["end"] = ms(w1)
+                p["conf"] = min(p["conf"], round(float(prob), 3))
+                continue
+            words.append({"text": t, "start": ms(w0), "end": ms(w1),
+                          "conf": round(float(prob), 3), "_seg": sid})
+    for w in words:
+        w.pop("_seg", None)
+    return words, dropped
+
+
 def _run_fw(wav: str, model: str, language: str | None, progress, base: float, span: float,
             cond_prev: bool = FW_COND_PREV):
     m = _fw(model)
@@ -106,42 +158,54 @@ def _run_fw(wav: str, model: str, language: str | None, progress, base: float, s
         wav, language=language, task="transcribe", beam_size=FW_BEAM,
         vad_filter=False, word_timestamps=True, condition_on_previous_text=cond_prev,
         hallucination_silence_threshold=HALLU_SILENCE)
-    regions = _speech_regions(wav) if VAD_GUARD else None
-    words, dropped = [], []
-    dur = max(info.duration, 1e-3)
-    for s in segs:
-        progress(base + span * min(1.0, s.end / dur), "decoding")
-        sw = [w for w in (s.words or []) if w.word.strip()]
-        if not sw:
-            continue
-        seg_d = max(s.end - s.start, 1e-3)
-        nv = len(_VOWELS.findall(s.text.lower()))
-        if nv >= 4 and nv / seg_d > 15:  # >15 syllables/s cannot be speech
-            dropped.append({"text": s.text.strip(), "start": ms(s.start), "end": ms(s.end),
-                            "reason": "implausible-rate"})
-            continue
-        if regions is not None:
-            if _overlap(s.start, s.end, regions) / seg_d < 0.1:
-                # text over audio Silero calls non-speech: the classic whisper
-                # hallucination ("Продолжение следует...", "Субтитры ...")
-                dropped.append({"text": s.text.strip(), "start": ms(s.start), "end": ms(s.end),
-                                "reason": "no-speech"})
-                continue
-        for w in sw:
-            t = w.word.strip()  # punctuation stays attached ("Привет," / "так.")
-            if (words and words[-1].get("_seg") == s.id and not w.word[:1].isspace()
-                    and (not t[0].isalnum() or words[-1]["text"].endswith("-"))):
-                # continuation piece without a leading space ("как" + "-то", "по" + "-другому")
-                p = words[-1]
-                p["text"] += t
-                p["end"] = ms(w.end)
-                p["conf"] = min(p["conf"], round(float(w.probability), 3))
-                continue
-            words.append({"text": t, "start": ms(w.start), "end": ms(w.end),
-                          "conf": round(float(w.probability), 3), "_seg": s.id})
-    for w in words:
-        w.pop("_seg", None)
+    words, dropped = _whisper_words(
+        ((s.id, s.start, s.end, s.text, [(w.word, w.start, w.end, w.probability) for w in (s.words or [])])
+         for s in segs), wav, info.duration, progress, base, span)
     return words, info.language, round(float(info.language_probability), 3), dropped
+
+
+# --- mlx-whisper (Apple GPU) -------------------------------------------------------------
+def _mlx_repo(model: str) -> str:
+    return MLX_REPOS.get(model, model)
+
+
+def _mlx(model: str):
+    key = ("mlx-whisper", model)
+    if key not in _MODELS:
+        try:
+            import mlx.core as mx
+            from mlx_whisper.transcribe import ModelHolder
+        except ImportError as e:
+            raise WorkerError(f"mlx-whisper is not installed in this venv ({e}); it needs Apple Silicon "
+                              "and bench/envs/asr-fw from deploy/mac/setup.sh") from e
+        t = time.perf_counter()
+        # mlx_whisper.transcribe() takes the model from this one-slot cache
+        for k in [k for k in _MODELS if k[0] == "mlx-whisper"]:
+            del _MODELS[k]
+        ModelHolder.get_model(_mlx_repo(model), mx.float16)
+        _MODELS[key] = _mlx_repo(model)
+        log(f"[asr] loaded mlx-whisper {model} in {time.perf_counter() - t:.1f}s")
+    return _MODELS[key]
+
+
+def _run_mlx(wav: str, model: str, language: str | None, progress, base: float, span: float,
+             cond_prev: bool = FW_COND_PREV):
+    import mlx_whisper
+    repo = _mlx(model)
+    x, sr = read_wav(wav)
+    if sr != 16000:
+        raise WorkerError(f"wav16 must be 16 kHz, got {sr}")
+    audio = x.mean(1)
+    progress(base, "decoding")
+    out = mlx_whisper.transcribe(
+        audio, path_or_hf_repo=repo, language=language, task="transcribe", verbose=None,
+        word_timestamps=True, condition_on_previous_text=cond_prev,
+        hallucination_silence_threshold=HALLU_SILENCE)
+    words, dropped = _whisper_words(
+        ((s["id"], s["start"], s["end"], s["text"],
+          [(w["word"], w["start"], w["end"], w["probability"]) for w in s.get("words", [])])
+         for s in out["segments"]), wav, len(audio) / sr, progress, base, span)
+    return words, out.get("language"), None, dropped
 
 
 # --- onnx-asr (GigaAM / parakeet) -----------------------------------------------------
@@ -217,7 +281,7 @@ def _run_onnx(wav: str, provider: str, model: str, language: str | None, progres
 # --- op ---------------------------------------------------------------------------------
 def op_asr(req, progress):
     wav = need_file(req, "wav16")
-    provider = req.get("provider") or "faster-whisper"
+    provider = req.get("provider") or DEFAULT_PROVIDER
     language = req.get("language") or None
     if provider == "faster-whisper":
         model = req.get("model") or FW_DEFAULT
@@ -225,16 +289,23 @@ def op_asr(req, progress):
         cond = FW_COND_PREV if cond is None else bool(cond)
         run = lambda b, s, retry=False: _run_fw(wav, model, language, progress, b, s,  # noqa: E731
                                                 cond and not retry)
+    elif provider == "mlx-whisper":
+        model = req.get("model") or MLX_DEFAULT
+        cond = req.get("condition_on_previous_text")
+        cond = FW_COND_PREV if cond is None else bool(cond)
+        run = lambda b, s, retry=False: _run_mlx(wav, model, language, progress, b, s,  # noqa: E731
+                                                 cond and not retry)
     elif provider in ONNX_DEFAULTS:
         model = req.get("model") or ONNX_DEFAULTS[provider]
         run = lambda b, s, retry=False: _run_onnx(wav, provider, model, language, progress, b, s)  # noqa: E731
     else:
-        raise WorkerError(f"unknown provider {provider!r} (faster-whisper, gigaam, parakeet)")
+        raise WorkerError(f"unknown provider {provider!r} (faster-whisper, mlx-whisper, gigaam, parakeet)")
 
     t = time.perf_counter()
     if (provider, model) not in _MODELS:
         progress(0.0, "loading model")
-        (_fw(model) if provider == "faster-whisper" else _onnx(provider, model))
+        (_fw(model) if provider == "faster-whisper" else _mlx(model) if provider == "mlx-whisper"
+         else _onnx(provider, model))
     load_ms = ms(time.perf_counter() - t)
 
     t = time.perf_counter()
