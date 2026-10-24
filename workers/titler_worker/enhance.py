@@ -14,17 +14,18 @@ from contextlib import contextmanager
 
 import numpy as np
 
-from .common import REPO, THREADS, ffmpeg_bin, ms, read_wav
+from .common import APPLE_SILICON, REPO, THREADS, ffmpeg_bin, ms, read_wav, scratch
 from .protocol import WorkerError, log, need, need_file, need_out
 
 SR = 48000
 DFN_BIN = os.environ.get("TITLER_DFN_BIN", str(
-    REPO / "bench/envs/enh-dfn-bin/deep-filter-0.5.6-x86_64-unknown-linux-musl"))
+    REPO / "bench/envs/enh-dfn-bin" / ("deep-filter-0.5.6-aarch64-apple-darwin" if APPLE_SILICON
+                                       else "deep-filter-0.5.6-x86_64-unknown-linux-musl")))
 # `deep-filter -D` (compensate delay) removes the 30 ms lookahead from the start but
 # returns 1440 samples fewer -> pad the tail. Measured with GCC-PHAT on all bench clips.
 DFN_LATENCY = 1440
 DFN_ATTEN = {"gentle": 12, "voice": 20, "strong": None}  # dB attenuation limit; None = unlimited
-CV_WORKDIR = os.environ.get("TITLER_CLEARVOICE_DIR", "/mnt/flash/scratch/clearvoice")
+CV_WORKDIR = os.environ.get("TITLER_CLEARVOICE_DIR", scratch("clearvoice"))
 MF2 = "MossFormer2_SE_48K"
 DEHUM_HP = float(os.environ.get("TITLER_DEHUM_HP", "60"))
 DEHUM = (f"highpass=f={DEHUM_HP:g}:poles=2,"

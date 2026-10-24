@@ -11,7 +11,7 @@ import re
 import time
 import zlib
 
-from .common import THREADS, ms, read_wav
+from .common import THREADS, ms, read_wav, scratch
 from .protocol import WorkerError, log, need_file
 
 FW_DEFAULT = os.environ.get("TITLER_FW_MODEL", "large-v3-turbo")
@@ -26,7 +26,7 @@ VAD_GUARD = os.environ.get("TITLER_FW_VAD_GUARD", "1") != "0"
 # flips it to False (the classic remedy for repetition loops). Override per request.
 FW_COND_PREV = os.environ.get("TITLER_FW_CONDITION_PREV", "1") != "0"
 ONNX_DEFAULTS = {"gigaam": "gigaam-v3-e2e-rnnt", "parakeet": "nemo-parakeet-tdt-0.6b-v3"}
-ONNX_LOCAL = os.environ.get("TITLER_ONNX_ASR_DIR", "/mnt/flash/scratch/hf-cache/onnx-asr")
+ONNX_LOCAL = os.environ.get("TITLER_ONNX_ASR_DIR", scratch("hf-cache/onnx-asr", "onnx-asr"))
 ONNX_LANG = {"gigaam": "ru", "parakeet": None}  # GigaAM-v3 is Russian-only
 
 _VOWELS = re.compile(r"[аеёиоуыэюяіїєaeiouy]")

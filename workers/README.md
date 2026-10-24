@@ -32,26 +32,27 @@ Spawns each role with its protocol default command (or `TITLER_WORKER_<ROLE>`), 
 real request, checks results, prints timings. Stdlib-only, but under a venv with
 numpy+soundfile (align-main) it also checks `speech + background == input` and the DFN3
 residual lag (GCC-PHAT). Output + per-role stderr logs: `$TITLER_SMOKE_OUT`
-(default `/mnt/flash/scratch/titler/smoke/<clip>/`).
+(default `/mnt/flash/scratch/titler/smoke/<clip>/` on n5, `~/.cache/titler/smoke/<clip>/` elsewhere).
 
 ## Environment
 
 | var | default | |
 |---|---|---|
 | `TITLER_THREADS` | 8 | torch / CT2 / onnxruntime / rayon threads |
-| `HF_HOME`, `TORCH_HOME`, `UV_CACHE_DIR` | `/mnt/flash/scratch/{hf-cache,torch-hub,uv-cache}` | set with `setdefault` |
+| `TITLER_SCRATCH` | `/mnt/flash/scratch` if it exists, else `~/.cache/titler` | titler cache root (onnx-asr, ClearVoice, GigaAM, smoke) |
+| `HF_HOME`, `TORCH_HOME`, `UV_CACHE_DIR` | n5: `/mnt/flash/scratch/{hf-cache,torch-hub,uv-cache}`; elsewhere library defaults | set with `setdefault`, n5 layout only |
 | `TITLER_FW_MODEL` | `large-v3-turbo` | faster-whisper model (request `model` overrides) |
 | `TITLER_FW_COMPUTE` / `TITLER_FW_BEAM` | `int8` / 5 | |
 | `TITLER_FW_HALLU_SILENCE` | 2.0 | `hallucination_silence_threshold` (s) |
 | `TITLER_FW_CONDITION_PREV` | 1 | `condition_on_previous_text` (see deviations); request key `condition_on_previous_text` overrides |
 | `TITLER_FW_VAD_GUARD` | 1 | drop whisper segments with <10 % Silero speech overlap (VAD never cuts the audio) |
-| `TITLER_ONNX_ASR_DIR` | `/mnt/flash/scratch/hf-cache/onnx-asr` | onnx-asr model dirs (real files, not HF symlinks) |
+| `TITLER_ONNX_ASR_DIR` | n5: `/mnt/flash/scratch/hf-cache/onnx-asr`; else `~/.cache/titler/onnx-asr` | onnx-asr model dirs (real files, not HF symlinks) |
 | `TITLER_ALIGN_BACKEND` / `TITLER_ALIGN_VERIFIER` | `w2v_ru_q8` / `gigaam` | |
 | `TITLER_ALIGN_CHUNK_S` | 30 | precompute chunk length (bounded RSS; ±1 s context) |
-| `TITLER_DFN_BIN` | `bench/envs/enh-dfn-bin/deep-filter-0.5.6-x86_64-unknown-linux-musl` | |
-| `TITLER_CLEARVOICE_DIR` | `/mnt/flash/scratch/clearvoice` | ClearVoice resolves `checkpoints/` relative to cwd |
+| `TITLER_DFN_BIN` | `bench/envs/enh-dfn-bin/deep-filter-0.5.6-{x86_64-unknown-linux-musl,aarch64-apple-darwin}` | by platform |
+| `TITLER_CLEARVOICE_DIR` | `$TITLER_SCRATCH/clearvoice` | ClearVoice resolves `checkpoints/` relative to cwd |
 | `TITLER_DEHUM_HP` | 60 | de-hum highpass Hz (+ 50/100/150 Hz notches, ffmpeg) |
-| `TITLER_FFMPEG` | `~/.local/bin/ffmpeg` | |
+| `TITLER_FFMPEG` | `~/.local/bin/ffmpeg`, else `ffmpeg` on PATH | |
 
 ## Behaviour notes
 

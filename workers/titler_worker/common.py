@@ -5,18 +5,28 @@ Imported first by __main__ so thread/cache env vars are set before torch/onnxrun
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import struct
+import sys
 import wave
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SCRATCH = "/mnt/flash/scratch"
 
-os.environ.setdefault("HF_HOME", f"{SCRATCH}/hf-cache")
-os.environ.setdefault("TORCH_HOME", f"{SCRATCH}/torch-hub")
-os.environ.setdefault("UV_CACHE_DIR", f"{SCRATCH}/uv-cache")
-os.environ.setdefault("XDG_CACHE_HOME", f"{SCRATCH}/hf-cache/xdg")
+# n5 keeps every cache on the flash pool. Elsewhere (the Mac) titler-only files go to
+# ~/.cache/titler and HF/torch keep their library defaults (shared with other tools).
+N5_SCRATCH = "/mnt/flash/scratch"
+SCRATCH = os.environ.get("TITLER_SCRATCH") or (
+    N5_SCRATCH if os.path.isdir(N5_SCRATCH) else os.path.expanduser("~/.cache/titler"))
+ON_N5_LAYOUT = SCRATCH == N5_SCRATCH
+APPLE_SILICON = sys.platform == "darwin" and platform.machine() == "arm64"
+
+if ON_N5_LAYOUT:
+    os.environ.setdefault("HF_HOME", f"{SCRATCH}/hf-cache")
+    os.environ.setdefault("TORCH_HOME", f"{SCRATCH}/torch-hub")
+    os.environ.setdefault("UV_CACHE_DIR", f"{SCRATCH}/uv-cache")
+    os.environ.setdefault("XDG_CACHE_HOME", f"{SCRATCH}/hf-cache/xdg")
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -24,6 +34,11 @@ THREADS = max(1, int(os.environ.get("TITLER_THREADS", "8")))
 for _v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS",
            "RAYON_NUM_THREADS"):
     os.environ.setdefault(_v, str(THREADS))
+
+
+def scratch(n5_rel: str, rel: str | None = None) -> str:
+    """A titler cache dir: SCRATCH/n5_rel in the n5 layout, SCRATCH/rel (default n5_rel) elsewhere."""
+    return os.path.join(SCRATCH, n5_rel if ON_N5_LAYOUT else (rel or n5_rel))
 
 
 def ffmpeg_bin() -> str:

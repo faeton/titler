@@ -1,6 +1,5 @@
 #!/bin/bash
-# Titler v2 — first-time setup on the MacBook (Apple Silicon). UNTESTED on macOS:
-# written on n5 from the n5 setup; the Mac session is expected to fix it up.
+# Titler v2 — first-time setup on the MacBook (Apple Silicon). Idempotent.
 # Creates the worker venvs at the same paths the server defaults to (bench/envs/*),
 # so no TITLER_WORKER_* overrides are needed.
 set -euo pipefail
@@ -46,10 +45,7 @@ dfn="$E/enh-dfn-bin/deep-filter-0.5.6-aarch64-apple-darwin"
 pnpm install
 cat <<MSG
 
-Done. Suggested ~/.zshenv / .env additions for the Mac:
-  export TITLER_DFN_BIN=$repo/$dfn
-  export TITLER_FFMPEG=\$(command -v ffmpeg) TITLER_FFPROBE=\$(command -v ffprobe)
-  export HF_HOME=\$HOME/.cache/huggingface TORCH_HOME=\$HOME/.cache/torch
-  export TITLER_ONNX_ASR_DIR=\$HOME/.cache/titler/onnx-asr TITLER_CLEARVOICE_DIR=\$HOME/.cache/titler/clearvoice
+Done. No env needed: the server probes VideoToolbox, workers pick the arm64 DFN binary
+and keep titler caches in ~/.cache/titler (HF/torch use their own ~/.cache defaults).
 Then: pnpm --filter @titler/server dev   (and pnpm --filter @titler/web dev)
 MSG

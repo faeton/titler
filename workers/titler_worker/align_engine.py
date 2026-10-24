@@ -34,6 +34,8 @@ import torch
 import torchaudio
 import torchaudio.functional as AF
 
+from .common import ffmpeg_bin, scratch
+
 SR = 16000
 THREADS = int(os.environ.get("TITLER_THREADS", "8"))
 torch.set_num_threads(THREADS)
@@ -203,7 +205,7 @@ class GigaAMBackend(Backend):
     def __init__(self):
         import gigaam
         self.model = gigaam.load_model("v3_ctc", fp16_encoder=False, device="cpu",
-                                       download_root="/mnt/flash/scratch/gigaam-cache").eval()
+                                       download_root=scratch("gigaam-cache")).eval()
         voc = list(self.model.decoding.tokenizer.vocab)
         super().__init__("gigaam", len(voc), voc.index(" "), {c: i for i, c in enumerate(voc)})
 
@@ -245,8 +247,7 @@ def _load(path: str, mtime: float) -> np.ndarray:
             return x.mean(1)
     except Exception:
         pass
-    ff = os.path.expanduser("~/.local/bin/ffmpeg")
-    raw = subprocess.run([ff if os.path.exists(ff) else "ffmpeg", "-nostdin", "-v", "error", "-i", path,
+    raw = subprocess.run([ffmpeg_bin(), "-nostdin", "-v", "error", "-i", path,
                           "-ac", "1", "-ar", str(SR), "-f", "f32le", "-"],
                          capture_output=True, check=True).stdout
     return np.frombuffer(raw, np.float32).copy()

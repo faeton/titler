@@ -5,7 +5,7 @@
 
 Stdlib only (numpy/soundfile, if importable, enable extra enhance checks). Commands come
 from TITLER_WORKER_<ROLE> (JSON array) or the defaults in docs/worker-protocol.md.
-Outputs go to $TITLER_SMOKE_OUT (default /mnt/flash/scratch/titler/smoke).
+Outputs go to $TITLER_SMOKE_OUT (default /mnt/flash/scratch/titler/smoke on n5, ~/.cache/titler/smoke elsewhere).
 Exit code 0 only if every check passed.
 """
 from __future__ import annotations
@@ -213,7 +213,9 @@ def main():
     a = ap.parse_args()
     audio = REPO / "bench/samples/audio"
     wav16, wav48 = str(audio / f"{a.clip}.16k.wav"), str(audio / f"{a.clip}.48k.wav")
-    out = Path(os.environ.get("TITLER_SMOKE_OUT", "/mnt/flash/scratch/titler/smoke")) / a.clip
+    n5 = "/mnt/flash/scratch"
+    default = f"{n5}/titler/smoke" if os.path.isdir(n5) else os.path.expanduser("~/.cache/titler/smoke")
+    out = Path(os.environ.get("TITLER_SMOKE_OUT") or default) / a.clip
     out.mkdir(parents=True, exist_ok=True)
     roles = a.roles.split(",")
     asr_words: list = []
