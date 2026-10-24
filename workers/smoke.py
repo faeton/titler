@@ -135,15 +135,28 @@ def smoke_asr(w, wav16):
     return words
 
 
+def bench_words(wav16):
+    """Words of the clip from the gitignored n5 ASR run (transcripts stay out of the repo)."""
+    clip = Path(wav16).name.split(".")[0]
+    p = REPO / "bench/runs/asr/fw-turbo-auto-novad" / f"{clip}.json"
+    if not p.exists():
+        return []
+    return [{"text": x["w"], "start": round(x["start"] * 1000), "end": round(x["end"] * 1000)}
+            for x in json.loads(p.read_text())["words"]]
+
+
 def smoke_align(w, wav16, asr_words):
     r = ok_result(w.call("align_precompute", wav16=wav16), "align_precompute")
     if r:
         print(f"      precompute {r['ms']} ms")
     # a 7-word window from the ASR output, with «синий» inserted in the middle
-    ws = asr_words[2:9] if len(asr_words) >= 9 else [
-        {"text": t, "start": s, "end": e} for t, s, e in [
-            ("мы", 2580, 2700), ("идём", 2700, 3040), ("вдоль", 3040, 3280), ("реки", 3280, 3460),
-            ("и", 3460, 3580), ("смотрим", 3580, 3860), ("вокруг", 3860, 4420)]]
+    ws = asr_words[2:9]
+    if len(ws) < 7:
+        print("      (no asr role this run: words from bench/runs/asr/fw-turbo-auto-novad)")
+        ws = bench_words(wav16)[2:9]
+    if len(ws) < 7:
+        check(False, "align_window needs words: add the asr role or copy bench/runs/asr from n5")
+        return
     texts = [x["text"] for x in ws]
     fake_at = len(texts) // 2
     texts.insert(fake_at, "синий")

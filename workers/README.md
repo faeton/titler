@@ -49,10 +49,12 @@ residual lag (GCC-PHAT). Output + per-role stderr logs: `$TITLER_SMOKE_OUT`
 | `TITLER_FW_CONDITION_PREV` | 1 | `condition_on_previous_text` (see deviations); request key `condition_on_previous_text` overrides |
 | `TITLER_FW_VAD_GUARD` | 1 | drop whisper segments with <10 % Silero speech overlap (VAD never cuts the audio) |
 | `TITLER_ONNX_ASR_DIR` | n5: `/mnt/flash/scratch/hf-cache/onnx-asr`; else `~/.cache/titler/onnx-asr` | onnx-asr model dirs (real files, not HF symlinks) |
-| `TITLER_ALIGN_BACKEND` / `TITLER_ALIGN_VERIFIER` | `w2v_ru_q8` / `gigaam` | |
+| `TITLER_ALIGN_BACKEND` / `TITLER_ALIGN_VERIFIER` | `w2v_ru_q8` (Apple Silicon: `w2v_ru` fp32) / `gigaam` | |
+| `TITLER_ALIGN_DEVICE` | `cpu` | torch device for non-int8 align backends (`mps` measured slower / unsupported) |
 | `TITLER_ALIGN_CHUNK_S` | 30 | precompute chunk length (bounded RSS; ±1 s context) |
 | `TITLER_DFN_BIN` | `bench/envs/enh-dfn-bin/deep-filter-0.5.6-{x86_64-unknown-linux-musl,aarch64-apple-darwin}` | by platform |
 | `TITLER_CLEARVOICE_DIR` | `$TITLER_SCRATCH/clearvoice` | ClearVoice resolves `checkpoints/` relative to cwd |
+| `TITLER_ENHANCE_DEVICE` | ClearVoice auto (mps > cuda > cpu) | MF2 torch device |
 | `TITLER_DEHUM_HP` | 60 | de-hum highpass Hz (+ 50/100/150 Hz notches, ffmpeg) |
 | `TITLER_FFMPEG` | `~/.local/bin/ffmpeg`, else `ffmpeg` on PATH | |
 

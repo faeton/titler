@@ -34,7 +34,7 @@ import torch
 import torchaudio
 import torchaudio.functional as AF
 
-from .common import ffmpeg_bin, scratch
+from .common import APPLE_SILICON, ffmpeg_bin, scratch
 
 SR = 16000
 THREADS = int(os.environ.get("TITLER_THREADS", "8"))
@@ -54,7 +54,11 @@ THRESHOLDS = {
     "w2v_ru_q8": (1.0, -3.0, -99.0),
     "gigaam": (1.0, 0.0, -99.0),
 }
-DEFAULT_BACKEND = os.environ.get("TITLER_ALIGN_BACKEND", "w2v_ru_q8")
+# Apple Silicon: fp32 on CPU (Accelerate) is 2x faster than int8 (qnnpack) and bit-identical
+# to n5 fp32; int8 results differ between fbgemm (x86) and qnnpack (ARM) anyway. Same
+# aligned/unconfirmed decisions as n5 q8 on 707 smoke-style windows (101/101 fakes rejected).
+# MPS: GigaAM is slower there (1.1 vs 0.4 s / 33 s clip) and w2v conv1d is unsupported.
+DEFAULT_BACKEND = os.environ.get("TITLER_ALIGN_BACKEND", "w2v_ru" if APPLE_SILICON else "w2v_ru_q8")
 DEFAULT_VERIFIER = os.environ.get("TITLER_ALIGN_VERIFIER", "gigaam") or None
 FILLER_PENALTY = 1.0  # nats/frame below best non-blank for the edge filler
 
@@ -114,6 +118,18 @@ def lat2cyr(w: str) -> str:
 
 
 # --- backends -----------------------------------------------------------------
+# torch device for the non-quantized backends (int8 dynamic quantization is CPU-only).
+DEVICE = os.environ.get("TITLER_ALIGN_DEVICE", "cpu")
+
+
+def _q8(model):
+    """Dynamic int8 for Linear layers. ARM builds ship qnnpack but start with engine 'none'."""
+    qe = torch.backends.quantized
+    if qe.engine == "none" and "qnnpack" in qe.supported_engines:
+        qe.engine = "qnnpack"
+    return torch.ao.quantization.quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8)
+
+
 @dataclass(eq=False)
 class Backend:
     name: str
@@ -134,8 +150,10 @@ class MMSBackend(Backend):
     def __init__(self, q8: bool = False):
         b = torchaudio.pipelines.MMS_FA
         self.model = b.get_model(with_star=False).eval()
+        self.device = "cpu" if q8 else DEVICE
         if q8:  # dynamic int8 for Linear layers (transformer FFN/attention projections)
-            self.model = torch.ao.quantization.quantize_dynamic(self.model, {torch.nn.Linear}, dtype=torch.qint8)
+            self.model = _q8(self.model)
+        self.model.to(self.device)
         super().__init__("mms_fa_q8" if q8 else "mms_fa", 0, None, b.get_dict(star=None))
         self._cache = {}
         from uroman import Uroman
@@ -143,8 +161,8 @@ class MMSBackend(Backend):
 
     def emissions(self, wav):
         with torch.inference_mode():
-            em, _ = self.model(wav.unsqueeze(0))
-        return torch.log_softmax(em[0], -1), wav.shape[-1] / SR / em.shape[1]
+            em, _ = self.model(wav.unsqueeze(0).to(self.device))
+        return torch.log_softmax(em[0].float().cpu(), -1), wav.shape[-1] / SR / em.shape[1]
 
     def romanize(self, w):
         if w in self._cache:
@@ -166,8 +184,10 @@ class HFBackend(Backend):
     def __init__(self, name, repo, q8: bool = False):
         from transformers import AutoModelForCTC, Wav2Vec2CTCTokenizer
         self.model = AutoModelForCTC.from_pretrained(repo).eval()
+        self.device = "cpu" if q8 else DEVICE
         if q8:  # dynamic int8 for Linear layers
-            self.model = torch.ao.quantization.quantize_dynamic(self.model, {torch.nn.Linear}, dtype=torch.qint8)
+            self.model = _q8(self.model)
+        self.model.to(self.device)
         tok = Wav2Vec2CTCTokenizer.from_pretrained(repo)
         vocab = {k.lower(): v for k, v in tok.get_vocab().items()}
         blank = vocab.get("<blank>", tok.pad_token_id)
@@ -181,7 +201,7 @@ class HFBackend(Backend):
     def emissions(self, wav):
         x = (wav - wav.mean()) / (wav.std() + 1e-7)
         with torch.inference_mode():
-            lg = self.model(x.unsqueeze(0)).logits[0]
+            lg = self.model(x.unsqueeze(0).to(self.device)).logits[0].float().cpu()
         return torch.log_softmax(lg, -1), wav.shape[-1] / SR / lg.shape[0]
 
     def _tok(self, w0):
@@ -204,17 +224,18 @@ class GigaAMBackend(Backend):
 
     def __init__(self):
         import gigaam
-        self.model = gigaam.load_model("v3_ctc", fp16_encoder=False, device="cpu",
+        self.device = DEVICE
+        self.model = gigaam.load_model("v3_ctc", fp16_encoder=False, device=self.device,
                                        download_root=scratch("gigaam-cache")).eval()
         voc = list(self.model.decoding.tokenizer.vocab)
         super().__init__("gigaam", len(voc), voc.index(" "), {c: i for i, c in enumerate(voc)})
 
     def emissions(self, wav):
         with torch.inference_mode():
-            x = wav.unsqueeze(0)
-            enc, enc_len = self.model.forward(x, torch.tensor([x.shape[-1]]))
-            lp = self.model.head(enc)[0]
-        return lp.float(), wav.shape[-1] / SR / lp.shape[0]
+            x = wav.unsqueeze(0).to(self.device)
+            enc, enc_len = self.model.forward(x, torch.tensor([x.shape[-1]], device=self.device))
+            lp = self.model.head(enc)[0].float().cpu()
+        return lp, wav.shape[-1] / SR / lp.shape[0]
 
     def tokens(self, w):
         w = lat2cyr("".join(_UK2RU.get(c, c) for c in w)).replace("ё", "е")

@@ -27,6 +27,10 @@ DFN_LATENCY = 1440
 DFN_ATTEN = {"gentle": 12, "voice": 20, "strong": None}  # dB attenuation limit; None = unlimited
 CV_WORKDIR = os.environ.get("TITLER_CLEARVOICE_DIR", scratch("clearvoice"))
 MF2 = "MossFormer2_SE_48K"
+# Unset = ClearVoice's own choice (mps > cuda > cpu). M3 Max MF2: mps 6.3 / 11.0 s vs cpu
+# 12.8 / 23.1 s (30 / 64 s clips); mps-vs-cpu speech SNR 32-55 dB, same order as Mac cpu vs n5
+# cpu (30 dB) — float noise, not an MPS defect.
+CV_DEVICE = os.environ.get("TITLER_ENHANCE_DEVICE")
 DEHUM_HP = float(os.environ.get("TITLER_DEHUM_HP", "60"))
 DEHUM = (f"highpass=f={DEHUM_HP:g}:poles=2,"
          "bandreject=f=50:width_type=q:w=8,bandreject=f=100:width_type=q:w=8,"
@@ -65,6 +69,10 @@ def _clearvoice():
         t = time.perf_counter()
         with _cwd(CV_WORKDIR):
             _CV["cv"] = ClearVoice(task="speech_enhancement", model_names=[MF2])
+        if CV_DEVICE:  # ClearVoice picks mps > cuda > cpu by itself
+            for m in _CV["cv"].models:
+                m.device = torch.device(CV_DEVICE)
+                m.model.to(m.device)
         log(f"[enhance] loaded {MF2} in {time.perf_counter() - t:.1f}s")
     return _CV["cv"]
 
