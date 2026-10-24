@@ -1,0 +1,28 @@
+# Consolidated image for a long-lived Titler GPU worker on n5 (Radeon 890M, gfx1150).
+# NOTE: this bakes in exactly what was tested from the scratch venv (bench/gpu/rocm/run.sh), but the
+# image itself was NOT built during the benchmark (it is ~14 GB: the torch ROCm wheel alone is 6.2 GB).
+FROM python:3.12-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libatomic1 libnuma1 libelf1 libdrm2 libgomp1 libsndfile1 git curl unzip \
+    && rm -rf /var/lib/apt/lists/*
+ENV VIRTUAL_ENV=/venv PATH=/venv/bin:$PATH
+RUN python -m venv /venv \
+ && pip install --no-cache-dir torch==2.14.1+rocm7.2 torchaudio --index-url https://download.pytorch.org/whl/rocm7.2 \
+ && printf 'torch==2.14.1+rocm7.2\n' > /tmp/c.txt \
+ && pip install --no-cache-dir -c /tmp/c.txt --extra-index-url https://download.pytorch.org/whl/rocm7.2 \
+      transformers accelerate soundfile librosa faster-whisper demucs uroman qwen-asr \
+      "git+https://github.com/salute-developers/GigaAM"
+# CTranslate2 ROCm wheel (gfx1150 is in its fat binary) + soname links to the ROCm libs torch bundles.
+RUN curl -sL -o /tmp/ct2.zip https://github.com/OpenNMT/CTranslate2/releases/download/v4.8.3/rocm-python-wheels-Linux.zip \
+ && unzip -q /tmp/ct2.zip -d /tmp/ct2 \
+ && pip install --no-cache-dir --no-deps --force-reinstall /tmp/ct2/temp-linux/ctranslate2-4.8.3-cp312-*.whl \
+ && rm -rf /tmp/ct2 /tmp/ct2.zip \
+ && mkdir -p /venv/rocm-sonames && L=/venv/lib/python3.12/site-packages/torch/lib \
+ && for p in libamdhip64.so.7 libhipblas.so.3 libhiprand.so.1 librocblas.so.5 libhipblaslt.so.1; do ln -s $L/${p%.*} /venv/rocm-sonames/$p; done
+ENV LD_LIBRARY_PATH=/venv/rocm-sonames:/venv/lib/python3.12/site-packages/torch/lib \
+    TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1 \
+    NO_MIOPEN=1 \
+    OMP_NUM_THREADS=8
+# Worker code must set torch.backends.cudnn.enabled = False (MIOpen is pathological on gfx1150).
+# run: docker run -d --device /dev/kfd --device /dev/dri --group-add <render gid> --group-add <video gid> \
+#        --ipc=host -v /mnt/flash/scratch/hf-cache:/hf ... titler-gpu-worker python -m titler_gpu_worker

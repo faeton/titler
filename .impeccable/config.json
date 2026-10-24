@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "montserrat",
+        "createdAt": "2026-10-24T06:31:17.046Z",
+        "reason": "Claude decided: Montserrat is the caption font bundled for libass export; preview must use the same face so preview matches the burned-in render (docs/PLAN-v2.md, packages/core/src/ass.ts CAPTION_FONT)"
+      }
+    ]
+  }
+}

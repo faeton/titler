@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice cleanup A/B</title>
+<style>
+:root { --bg:#f6f5f2; --fg:#1d1d1b; --muted:#6b6a66; --card:#fff; --line:#dddbd5; --acc:#2f5fd0; --accfg:#fff; }
+@media (prefers-color-scheme: dark) { :root { --bg:#151514; --fg:#ecebe7; --muted:#9b9a95; --card:#1f1f1d; --line:#353431; --acc:#7aa2ff; --accfg:#0d0d0c; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+main { max-width:980px; margin:0 auto; padding:20px 16px 60px; }
+h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:17px; margin:0 0 8px; }
+p.note { color:var(--muted); margin:0 0 18px; }
+section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin:0 0 18px; }
+.row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:8px 0; }
+button { font:inherit; border:1px solid var(--line); background:transparent; color:var(--fg); border-radius:8px; padding:6px 11px; cursor:pointer; min-width:44px; }
+button.on { background:var(--acc); color:var(--accfg); border-color:var(--acc); }
+button .nm { display:none; font-size:12px; opacity:.85; margin-left:4px; }
+section.revealed button .nm { display:inline; }
+.ctl { color:var(--muted); font-size:13px; }
+input[type=range] { flex:1; min-width:160px; }
+.t { font-variant-numeric:tabular-nums; color:var(--muted); font-size:13px; min-width:92px; }
+kbd { border:1px solid var(--line); border-radius:4px; padding:0 4px; font-size:12px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Voice cleanup — blind A/B</h1>
+<p class="note">All variants are loudness-matched (EBU R128, same LUFS within a clip) and latency-compensated. Switching keeps the playback position. Letters are shuffled per clip; press “Reveal” after you've picked. Keys: <kbd>1</kbd>…<kbd>9</kbd> switch variant in the last-used clip, <kbd>Space</kbd> play/pause, <kbd>0</kbd> (or “↺ Original”) jumps to the unprocessed original — not blind.</p>
+<div id="clips"></div>
+</main>
+<script>
+const DATA = /*DATA*/null;
+let active = null;
+const all = [];
+function fmt(t){ const m=Math.floor(t/60), s=(t%60).toFixed(1).padStart(4,'0'); return m+':'+s; }
+for (const [clip, d] of Object.entries(DATA)) {
+  const sec = document.createElement('section');
+  const st = { clip, mode:'excerpt', idx:0, audio:new Audio(), loop:true };
+  st.audio.preload = 'auto'; st.audio.loop = true;
+  sec.innerHTML = `<h2>${clip}</h2>
+   <div class="row ctl">Source:
+     <button data-mode="excerpt" class="on">Noisiest 10 s (from ${d.excerpt_start.toFixed(0)} s)</button>
+     <button data-mode="full">Full clip</button>
+     <span>· loop <input type="checkbox" class="loop" checked></span>
+     <button class="orig">↺ Original</button> <button class="reveal">Reveal</button></div>
+   <div class="row vars"></div>
+   <div class="row"><button class="pp">▶</button><input type="range" class="seek" min="0" max="1000" value="0"><span class="t">0:00.0</span></div>`;
+  const vars = sec.querySelector('.vars');
+  d.items.forEach((it, i) => {
+    const b = document.createElement('button');
+    b.innerHTML = `${it.letter}<span class="nm">${it.name}${it.ovrl ? ' · OVRL '+it.ovrl.toFixed(2) : ''}</span>`;
+    b.onclick = () => { active = st; select(i); };
+    vars.appendChild(b);
+  });
+  const src = (i) => `${clip}/${st.mode === 'excerpt' ? 'excerpt/' : ''}${d.items[i].name}.wav`;
+  function select(i) {
+    const t = st.audio.currentTime || 0, playing = !st.audio.paused;
+    st.idx = i; st.audio.src = src(i);
+    st.audio.addEventListener('loadedmetadata', () => { st.audio.currentTime = Math.min(t, st.audio.duration || t); if (playing) st.audio.play(); }, { once:true });
+    [...vars.children].forEach((b, j) => b.classList.toggle('on', j === i));
+  }
+  st.select = select;
+  sec.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
+    st.mode = b.dataset.mode; st.audio.pause();
+    sec.querySelectorAll('[data-mode]').forEach(x => x.classList.toggle('on', x === b));
+    st.audio.currentTime = 0; select(st.idx);
+  });
+  sec.querySelector('.loop').onchange = e => st.audio.loop = e.target.checked;
+  st.origIdx = d.items.findIndex(it => it.name === 'original');
+  sec.querySelector('.orig').onclick = () => { active = st; select(st.origIdx); };
+  sec.querySelector('.reveal').onclick = () => sec.classList.toggle('revealed');
+  const pp = sec.querySelector('.pp'), seek = sec.querySelector('.seek'), tt = sec.querySelector('.t');
+  pp.onclick = () => { active = st; st.audio.paused ? st.audio.play() : st.audio.pause(); };
+  st.audio.onplay = () => { pp.textContent = '❚❚'; for (const o of all) if (o !== st) o.audio.pause(); };
+  st.audio.onpause = () => pp.textContent = '▶';
+  st.audio.ontimeupdate = () => { const D = st.audio.duration || 1; seek.value = 1000 * st.audio.currentTime / D; tt.textContent = fmt(st.audio.currentTime); };
+  seek.oninput = () => { const D = st.audio.duration || 0; st.audio.currentTime = D * seek.value / 1000; };
+  select(0);
+  all.push(st);
+  document.getElementById('clips').appendChild(sec);
+}
+document.addEventListener('keydown', e => {
+  if (!active || e.target.tagName === 'INPUT') return;
+  if (e.key === ' ') { e.preventDefault(); active.audio.paused ? active.audio.play() : active.audio.pause(); }
+  else if (e.key === '0') active.select(active.origIdx);
+  else if (/^[1-9]$/.test(e.key)) { const i = +e.key - 1; if (i < DATA[active.clip].items.length) active.select(i); }
+});
+</script>
+</body>
+</html>

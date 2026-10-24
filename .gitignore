@@ -1,7 +1,7 @@
 node_modules/
 dist/
 *.tsbuildinfo
-vite.config.js
+apps/web/vite.config.js
 vite.config.d.ts
 .venv/
 __pycache__/
@@ -26,3 +26,16 @@ logs/
 # Wrangler
 .wrangler/
 bench_mac/
+
+# Benchmarks (media + run outputs)
+bench/samples/
+bench/runs/
+bench/envs/
+
+# v2 runtime data (db, sources, artifacts)
+data/
+data
+bench/envs
+apps/web/test-results/
+apps/web/dev-media/
+bench/refs/
