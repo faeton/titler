@@ -13,9 +13,9 @@ Clips: `video-34238` (33 s), `video-34442` (30 s), `video-34585` (64 s), 16 kHz 
 > headline configs in `runs/asr/_timing2/`.
 
 ## What the clips contain
-- **34238**: Russian (0–17 s) **plus a second, quieter speaker in English, 18–32 s** ("Same same, you've been in Thailand recently? … they do same same there all the time…") — the code-switching test.
+- **34238**: Russian (0–17 s) **plus a second, quieter speaker in English, 18–32 s** (short conversational phrases) — the code-switching test.
 - **34442**: Russian, colloquial.
-- **34585**: fast colloquial Russian, place name **Glenelg** (Adelaide → "в Гленелге"), slang ("коворкинги", "кебабчик", "шук-шук-шук").
+- **34585**: fast colloquial Russian, a foreign place name in a Russian case form, slang, loanwords and onomatopoeia.
 - **No Ukrainian and none of the brand terms** (Awerti, Esports Charts, Streams Charts). Ukrainian handling and keyterm biasing are **untested**.
 
 ## Results
@@ -64,11 +64,11 @@ Pairwise disagreement (`score.py --pairwise`): fw-turbo-auto lowest mean (26%), 
 | canary-1b-v2, large-v3 + prompt | Translated to Russian |
 | T-one, Vosk | Fragments |
 
-**2. Glenelg (34585):** GigaAM-e2e, antony66, parakeet "в Глинелге" (closest); turbo "в Глинялге"; Qwen "вгляделся"; large-v3 VAD "глянил где"; T-one "вглянел где". Dictionary case.
+**2. Foreign place name (34585):** GigaAM-e2e, antony66, parakeet closest; turbo one vowel off; Qwen substitutes a common Russian verb; large-v3 VAD and T-one split it into two wrong words. Dictionary case.
 
-**3. Colloquial Russian:** large-v3 VAD drops function words (23.7% vs turbo 3.0%). Qwen paraphrases slang ("я имею в виду что и"→"между прочим", "кебабчик"→"типа обчика", "конкретно"→"панкредный"). "коворкинги": turbo ✓, others vary. "штуки/штуньки/штучки/штуковинки" (34238) — listening needed. "щуканом" (34442): all agree, maybe "щучкой" — agreement ≠ correct. parakeet appends "I don't know" at 14.9–15.2 s of 34442 — unverified.
+**3. Colloquial Russian:** large-v3 VAD drops function words (23.7% vs turbo 3.0%). Qwen paraphrases slang and filler phrases and mangles diminutives. A loanword: turbo ✓, others vary. A diminutive in 34238: four different spellings across models — listening needed. A rare instrumental-case noun in 34442: all agree, possibly wrong — agreement ≠ correct. parakeet appends "I don't know" at 14.9–15.2 s of 34442 — unverified.
 
-**4. Numbers:** GigaAM-e2e writes "за 3 дня", others "за три дня"; score.py doesn't normalise digits.
+**4. Numbers:** GigaAM-e2e writes digits ("3"), others words ("три"); score.py doesn't normalise digits.
 
 **5. Keyterm prompts:** Whisper `initial_prompt` changed style and caused EN→RU translation; Qwen `context` ~no effect. Untestable until clips contain the terms.
 

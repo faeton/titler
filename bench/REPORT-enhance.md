@@ -8,7 +8,7 @@ Scripts: `bench/enhance/` · outputs: `bench/runs/enhance/` (`raw/` model output
 `aligned/` latency-compensated & length-exact 48k + 16k, `stems/` speech/background pairs,
 `results.json`, `results.csv`, `table.md`, `wer_per_clip.md`, `stem_leak.json`) ·
 **listening page: `bench/runs/enhance/listen/index.html`** (serve the folder, e.g.
-`cd bench/runs/enhance/listen && python3 -m http.server 8790 --bind 100.115.236.50`, or open from SMB).
+`cd bench/runs/enhance/listen && python3 -m http.server 8790 --bind <n5 tailnet IP>`, or open from SMB).
 
 ## What was measured
 

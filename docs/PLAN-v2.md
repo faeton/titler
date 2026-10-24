@@ -104,7 +104,7 @@ well as on n5. Everything host-specific stays behind config:
 | Whisper | faster-whisper (CT2 CPU / ROCm container) | **mlx-whisper** turbo on the GPU (v1 measured ~6 s per 60 s) |
 | GigaAM / aligner / MossFormer2 | torch CPU / ROCm | torch **MPS** (verify per model; CPU fallback) |
 | Workers | `bench/envs/*` venvs, later ROCm container | one `uv` venv per role under `~/.cache/titler` |
-| Access | tailnet `https://n5.bee-ruffe.ts.net:8772` | `localhost` (+ LAN/tailnet for the phone) |
+| Access | tailnet `https://n5.<tailnet>.ts.net:8772` | `localhost` (+ LAN/tailnet for the phone) |
 
 Encoder choice is a capability probe (`hw` = vaapi | videotoolbox | none), ASR backend per
 role from env, and the data dir is configurable. Projects are portable by content hash, so
@@ -156,4 +156,4 @@ language switches, boundary error, minutes of manual work per minute of video.
 
 1. Commercial or personal? Decides MMS (CC-BY-NC) for English alignment.
 2. GigaAM is Sber/Salute — fine to use locally? (Recommended second hypothesis.)
-3. Where it runs for the phone: tailnet-only `https://n5.bee-ruffe.ts.net:<port>` (assumed).
+3. Where it runs for the phone: tailnet-only `https://n5.<tailnet>.ts.net:<port>` (assumed).

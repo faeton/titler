@@ -4,7 +4,7 @@
 import { chromium } from "playwright-core";
 import { mkdirSync } from "node:fs";
 
-const base = process.argv[2] ?? "http://100.115.236.50:5180";
+const base = process.argv[2] ?? process.env.TITLER_WEB_URL ?? "http://127.0.0.1:5180";
 const out = process.argv[3] ?? "test-results";
 const ws = process.env.PW_WS ?? "ws://127.0.0.1:30150/";
 mkdirSync(out, { recursive: true });
@@ -25,12 +25,12 @@ try {
   page.on("console", (m) => m.type() === "error" && !/Failed to load resource|MEDIA_ERR|NotSupportedError/.test(m.text()) && errors.push(m.text()));
 
   await page.goto(`${base}/?reset=1#/`);
-  await page.getByText("Глинялг, набережная.mov").waitFor();
+  await page.getByText("Демо, набережная.mov").waitFor();
   await page.screenshot({ path: `${out}/1-projects.png` });
   const noHScroll = await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
   check(noHScroll, "projects: no horizontal scroll at 360px");
 
-  await page.getByText("Глинялг, набережная.mov").click();
+  await page.getByText("Демо, набережная.mov").click();
   await page.locator(".pm .w").first().waitFor();
   check((await page.locator(".pm .w").count()) > 100, "text: words rendered as marked spans");
   check((await page.locator(".pm .w-review").count()) > 0, "text: needs_review words visible");

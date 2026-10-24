@@ -95,9 +95,9 @@ const sampleDoc = (): TranscriptDoc => {
   });
   // A few hand-picked states so every visual is visible in the demo.
   const pick = (t: string) => words.find((w) => w.text.startsWith(t));
-  const g = pick("Глинялг");
+  const g = pick("Лукоморье");
   if (g) g.review = "needs_review";
-  const k = pick("кебабчик");
+  const k = pick("пончики");
   if (k) k.review = "needs_review";
   const a = pick("ага");
   if (a) a.hidden = true;
@@ -157,7 +157,7 @@ const job = (projectId: string, kind: JobKind, dur: number, params: Record<strin
 
 const seed = (): Db => {
   const id = "demo";
-  const p = baseProject(id, "Глинялг, набережная.mov");
+  const p = baseProject(id, "Демо, набережная.mov");
   p.probe = probe();
   p.transcriptRev = 1;
   p.createdAt = "2026-10-20T18:00:00Z";

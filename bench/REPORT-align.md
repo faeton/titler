@@ -14,7 +14,7 @@ Goal (spec «Пропущенные слова и точные тайминги�
 
 ## Setup
 - Transcript: faster-whisper large-v3 int8 CPU, language auto, word_timestamps (`align/asr_fw.py` → `runs/align/asr/`); all clips detected ru; 253 words.
-- video-34238 20–31 s is **English** («same same, you've been in Thailand recently … they do same same there all the time»); with clip language ru, whisper wrote «сэм сэм юбилейный талант … таллинн». Excluded from agreement, used as mixed-language test. video-34442 30.0 s: whisper hallucinated «Продолжение следует...».
+- video-34238 20–31 s is **English** (a second speaker); with clip language ru, whisper wrote it as Cyrillic sound-alike gibberish. Excluded from agreement, used as mixed-language test. video-34442 30.0 s: whisper hallucinated «Продолжение следует...».
 - Env `bench/envs/align-main`: torch 2.5.1+cpu, transformers 4.46.3, whisperx 3.8.6 (--no-deps), gigaam 0.2.0, ctc-forced-aligner 0.3.0 (built with zig; `align/setup_env.sh`).
 
 | id | what | model / frame |
@@ -64,8 +64,8 @@ Whisper starts 130–260 ms early. GigaAM: no constant offset but ±150–300 ms
 - Anchors 100 % untouched; inserted word lands inside the anchor gap 99–100 %.
 - Inserting a fake never moves real neighbours (drop-worst re-alignment, ≤ len/2 iterations); 98–100 % of real neighbours stay aligned.
 - Fakes into a ≥250 ms pause: hybrid 98 % rejected vs 99 % in running speech.
-- Deletion → re-insertion («я приехал Самоа»): with the word deleted, neighbours absorb its audio (drift p90 150–450 ms), flagged only 1–14 % → **a missing word is not reliably detectable** by alignment. Re-inserting restores alignment exactly; inserted word aligned 93–99 % (hybrid 99 %), 10/30 ms from whole-clip boundaries.
-- Disputed ASR words: hybrid accepts 85 % long / 25 % short; «Продолжение следует» LLR −111/−51 rejected by all; «человека» (others: «человечка») rejected by MMS.
+- Deletion → re-insertion (a 3-word phrase): with the word deleted, neighbours absorb its audio (drift p90 150–450 ms), flagged only 1–14 % → **a missing word is not reliably detectable** by alignment. Re-inserting restores alignment exactly; inserted word aligned 93–99 % (hybrid 99 %), 10/30 ms from whole-clip boundaries.
+- Disputed ASR words: hybrid accepts 85 % long / 25 % short; «Продолжение следует» LLR −111/−51 rejected by all; a word the other systems heard as its diminutive rejected by MMS.
 - Cached whole-clip emissions vs per-window: boundaries ±1 frame, acceptance equivalent.
 
 ### Signals (p5 / p50 / p95)
@@ -86,7 +86,7 @@ Weak spot: 1–2-letter function words (reduced / merged with next word).
 | w2v_ru / w2v_ru_q8 | 1.0 | −3.0 | — |
 | mms_fa / mms1130 | 1.0 | −3.0 | −4.0 |
 
-status=aligned iff all pass; else unconfirmed + reason (low-llr, low-posterior, verifier, no-alignable-chars, no-fit) + provisional interval = gap between aligned neighbours. Optional UI tier: aligned but mean log-posterior < −2 → low confidence (catches wrong-but-present words, e.g. «юбилейный» for "you've been", which LLR accepts).
+status=aligned iff all pass; else unconfirmed + reason (low-llr, low-posterior, verifier, no-alignable-chars, no-fit) + provisional interval = gap between aligned neighbours. Optional UI tier: aligned but mean log-posterior < −2 → low confidence (catches wrong-but-present words, e.g. a Russian sound-alike word over English speech, which LLR accepts).
 
 ## 3. Latency (7-word window, median 5.1 s audio, warm, 8 threads, loaded host)
 | config | per edit, window emissions (median; med-of-3 / p90) | cached clip emissions |
@@ -105,13 +105,13 @@ Whole-clip precompute (w2v fp32 + GigaAM): 7.9 s (30 s clip), 16–19 s (33 / 64
 ## 4. Mixed language / Ukrainian / numbers (`align/bench_mixed.py`, `runs/align/mixed.md`)
 | case | mms_fa | w2v_ru | gigaam / hybrid |
 |-|-|-|-|
-| EN "same same you've been in thailand recently" | 5/7 | 6/7 | 3/7 |
-| EN "thailand they do same same there all the time" | 9/9 | 5/9 | 6/9 |
-| same audio, Cyrillic gibberish «сэм сэм юбилейный талант и» | 5/5 accepted | 5/5 accepted | 1/5 |
-| «эко воркинги» Cyrillic | ok (я ✗) | эко ✗ | 7/7 |
-| «eco workings» / «coworking» Latin | eco ✗ / ✓ | eco ✗ / ✓ | eco ✗ / ✓ |
-| «за 3 дня» verbalised / raw | ✓ / «3» unconfirmed | same | same |
-| uk spelling of same sounds («ні», «трильйон») | ✓ | ✓ | ✓ |
+| EN phrase 1 (7 words) | 5/7 | 6/7 | 3/7 |
+| EN phrase 2 (9 words) | 9/9 | 5/9 | 6/9 |
+| same audio, Cyrillic sound-alike gibberish (5 words) | 5/5 accepted | 5/5 accepted | 1/5 |
+| loanword split in Cyrillic (7-word window) | ok (я ✗) | эко ✗ | 7/7 |
+| same loanword in Latin: split / whole | eco ✗ / ✓ | eco ✗ / ✓ | eco ✗ / ✓ |
+| a digit ("3") verbalised / raw | ✓ / «3» unconfirmed | same | same |
+| uk spelling of same sounds  | ✓ | ✓ | ✓ |
 | uk translation over ru audio | 0/3 (rejected) | 1/3 | 0/3 |
 
 - Only MMS aligns English; ru models get crude Latin→Cyrillic transliteration: loanwords pass, English sentences mostly unconfirmed.

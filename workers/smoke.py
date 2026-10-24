@@ -142,8 +142,8 @@ def smoke_align(w, wav16, asr_words):
     # a 7-word window from the ASR output, with «синий» inserted in the middle
     ws = asr_words[2:9] if len(asr_words) >= 9 else [
         {"text": t, "start": s, "end": e} for t, s, e in [
-            ("по", 2580, 2700), ("крайней", 2700, 3040), ("мере", 3040, 3280), ("они", 3280, 3460),
-            ("не", 3460, 3580), ("очень", 3580, 3860), ("стараются", 3860, 4420)]]
+            ("мы", 2580, 2700), ("идём", 2700, 3040), ("вдоль", 3040, 3280), ("реки", 3280, 3460),
+            ("и", 3460, 3580), ("смотрим", 3580, 3860), ("вокруг", 3860, 4420)]]
     texts = [x["text"] for x in ws]
     fake_at = len(texts) // 2
     texts.insert(fake_at, "синий")

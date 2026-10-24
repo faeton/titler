@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 
 const clip = process.argv[2];
-const base = process.argv[3] ?? "http://100.115.236.50:5180";
+const base = process.argv[3] ?? process.env.TITLER_WEB_URL ?? "http://127.0.0.1:5180";
 const out = process.argv[4] ?? "test-results/server";
 mkdirSync(out, { recursive: true });
 const fails = [];

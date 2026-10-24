@@ -90,7 +90,7 @@ for a, P in plaus.items():
            "short": int(P["short"]), "long": int(P["long"])}
     summary["plausibility"][a] = row
     md.append(f"| {a} | {row['n']} | {row['vad_mean']} | {row['vad_lt50']} | {row['pre_db']} | {row['post_db']} | {row['short']} | {row['long']} |")
-md += ["", "Suspect region (34238 20-31 s: English speech of a Thai speaker that ru-auto whisper wrote as Cyrillic gibberish 'сэм сэм юбилейный…') — median word score, suspect vs normal words (whisper/whisperx: prob, others: mean token log-posterior; cfa: its own score)", ""]
+md += ["", "Suspect region (34238 20-31 s: English speech of a second speaker that ru-auto whisper wrote as Cyrillic gibberish) — median word score, suspect vs normal words (whisper/whisperx: prob, others: mean token log-posterior; cfa: its own score)", ""]
 for a, v in suspect_rows.items():
     summary["suspect"][a] = {"suspect_median": float(np.median(v["sus"])), "normal_median": float(np.median(v["ok"])),
                              "n_suspect": len(v["sus"])}

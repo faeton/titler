@@ -25,8 +25,8 @@ BENCH = Path(__file__).resolve().parents[1]
 OUT = BENCH / "runs/align/full"
 OUT.mkdir(parents=True, exist_ok=True)
 CLIPS = [a for a in sys.argv[1:] if not a.startswith("--")] or ["video-34238", "video-34442", "video-34585"]
-# 34238 20-31 s is English speech ("same same ... Thailand") that ru-auto whisper wrote as Cyrillic
-# gibberish ("сэм сэм юбилейный талант"): excluded from agreement, analysed separately
+# 34238 20-31 s is English speech that ru-auto whisper wrote as Cyrillic sound-alike
+# gibberish: excluded from agreement, analysed separately
 SUSPECT = {"video-34238": (20.0, 31.0)}
 
 
