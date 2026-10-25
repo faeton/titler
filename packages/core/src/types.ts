@@ -120,6 +120,49 @@ export const DEFAULT_AUDIO: AudioChoice = {
   dehum: false,
 };
 
+// ---- Series / covers -------------------------------------------------------
+
+/** Where a series is going; decides the maximum part length (see core/series.ts SERIES_PRESETS). */
+export type SeriesDestination = "ig_stories" | "ig_reels" | "yt_shorts" | "tiktok" | "fb_reels" | "telegram" | "custom";
+
+export interface SeriesNumbering {
+  enabled: boolean;
+  /** Show the badge only when the series has at least this many parts. */
+  minParts: number;
+  /** "short" = «1/3», "long" = «Часть 1 из 3». */
+  format: "short" | "long";
+  /** How long the badge stays at the start of each part; null = the whole part. */
+  durationMs: Ms | null;
+}
+
+export interface SeriesSettings {
+  destination: SeriesDestination;
+  /** Max part length for "custom". */
+  customMaxMs: Ms;
+  /** Repeat this much of the previous part at the start of the next one. */
+  overlapMs: Ms;
+  numbering: SeriesNumbering;
+  /** Hand-edited cut points (source ms) per destination; absent = automatic plan. */
+  cuts: Partial<Record<SeriesDestination, Ms[]>>;
+}
+
+export interface CoverSettings {
+  /** Optional headline drawn on the cover. */
+  title: string | null;
+  /** Draw the «1/3» badge on covers of series parts. */
+  badge: boolean;
+}
+
+export const DEFAULT_SERIES: SeriesSettings = {
+  destination: "telegram",
+  customMaxMs: 60_000,
+  overlapMs: 0,
+  numbering: { enabled: true, minParts: 3, format: "short", durationMs: 2500 },
+  cuts: {},
+};
+
+export const DEFAULT_COVER: CoverSettings = { title: null, badge: true };
+
 // ---- Project -------------------------------------------------------------
 
 export interface Probe {
@@ -146,7 +189,9 @@ export type ArtifactKind =
   | "audio_variant" // processed 48k wav (+ optional stems)
   | "compare_clip" // loudness-matched excerpt
   | "render"
-  | "subs";
+  | "subs"
+  | "cover" // JPEG cover for a video / series part
+  | "frame_scan"; // per-frame sharpness of the proxy (cover suggestions)
 
 export interface Artifact {
   key: string;
@@ -162,6 +207,8 @@ export interface ProjectSettings {
   audio: AudioChoice;
   framing: Framing;
   style: SubtitleStyle;
+  series: SeriesSettings;
+  cover: CoverSettings;
 }
 
 export interface Project {
@@ -185,7 +232,8 @@ export type JobKind =
   | "compare"
   | "asr"
   | "align"
-  | "render";
+  | "render"
+  | "cover";
 
 export type JobStatus = "queued" | "running" | "done" | "error" | "cancelled";
 

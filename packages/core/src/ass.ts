@@ -1,4 +1,5 @@
 import type { Cue } from "./cues.js";
+import { BADGE, type Badge } from "./series.js";
 import type { CaptionLook, Ms, SubtitleStyle } from "./types.js";
 
 // ASS writer for libass burn-in. The browser preview draws the same cues with
@@ -49,9 +50,17 @@ export interface AssOptions {
   width: number;
   height: number;
   style: SubtitleStyle;
+  /** Series numbering («1/3»), part-relative time. */
+  badge?: Badge | null;
 }
 
-export const toAss = (cues: Cue[], { width, height, style }: AssOptions): string => {
+/** Badge font size and box padding in output pixels (preview uses the same numbers). */
+export const badgeMetrics = (height: number): { size: number; pad: number; top: number } => {
+  const size = Math.round(height * BADGE.fontSizeRel);
+  return { size, pad: Math.round(size * BADGE.padRel), top: Math.round(height * BADGE.top) };
+};
+
+export const toAss = (cues: Cue[], { width, height, style, badge }: AssOptions): string => {
   const look = LOOKS[style.look];
   const size = Math.round(height * look.fontSizeRel);
   const outline = look.box ? Math.round(size * 0.35) : Math.max(1, Math.round(size * look.outline));
@@ -69,6 +78,7 @@ export const toAss = (cues: Cue[], { width, height, style }: AssOptions): string
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
     `Style: Cap,${CAPTION_FONT},${size},${assColor(look.primary)},${assColor(look.active)},${look.box ? assColor("#000000B3") : assColor("#000000")},${assColor("#00000080")},${look.bold ? -1 : 0},0,0,0,100,100,0,0,${look.box ? 3 : 1},${outline},0,2,${Math.round(width * 0.08)},${Math.round(width * 0.08)},${marginV},1`,
+    ...(badge ? [badgeStyle(height)] : []),
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -116,5 +126,16 @@ export const toAss = (cues: Cue[], { width, height, style }: AssOptions): string
     );
   }
 
+  if (badge && badge.end > badge.start) {
+    const m = badgeMetrics(height);
+    // \pos with \an8 anchors the text's top centre; the opaque box adds `pad` around it.
+    events.push(`Dialogue: 2,${assTime(badge.start)},${assTime(badge.end)},Badge,,0,0,0,,{\\an8\\pos(${Math.round(width / 2)},${m.top})}${assEscape(badge.text)}`);
+  }
+
   return [...header, ...events, ""].join("\n");
+};
+
+const badgeStyle = (height: number): string => {
+  const m = badgeMetrics(height);
+  return `Style: Badge,${CAPTION_FONT},${m.size},${assColor(BADGE.text)},${assColor(BADGE.text)},${assColor(BADGE.box)},${assColor(BADGE.box)},-1,0,0,0,100,100,0,0,3,${m.pad},0,8,0,0,0,1`;
 };

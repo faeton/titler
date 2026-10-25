@@ -19,11 +19,10 @@ export interface Cue {
 const SENTENCE_END = /[.!?…]["»)]*$/;
 const MIN_CUE_MS = 400;
 
-export const compileCues = (
-  doc: TranscriptDoc,
-  style: Pick<SubtitleStyle, "maxChars" | "maxLines" | "maxGapMs">,
-  durationMs: Ms,
-): Cue[] => {
+type CueStyle = Pick<SubtitleStyle, "maxChars" | "maxLines" | "maxGapMs">;
+
+/** Visible words with display times, in order. */
+const cueWords = (doc: TranscriptDoc, durationMs: Ms): CueWord[] => {
   const all = allWords(doc);
   const times = effectiveTimes(all, durationMs);
   const words: CueWord[] = [];
@@ -31,7 +30,41 @@ export const compileCues = (
     if (w.hidden) return;
     words.push({ wordId: w.id, text: w.text, start: times[i]!.start, end: times[i]!.end });
   });
+  return words;
+};
 
+export const compileCues = (doc: TranscriptDoc, style: CueStyle, durationMs: Ms): Cue[] =>
+  layoutCues(cueWords(doc, durationMs), style, durationMs);
+
+/**
+ * Cues of one series part, re-based to the part's own time (0 = part start).
+ * Words are assigned by their midpoint, so a cut between words never splits a
+ * word and each part lays out its own lines; words inside an overlap appear in
+ * both parts.
+ */
+export const compilePartCues = (doc: TranscriptDoc, style: CueStyle, durationMs: Ms, part: { startMs: Ms; endMs: Ms }): Cue[] => {
+  const { startMs: t0, endMs: t1 } = part;
+  const words = cueWords(doc, durationMs).filter((w) => {
+    const mid = (w.start + w.end) / 2;
+    return mid >= t0 && mid < t1;
+  });
+  const clamp = (t: Ms) => Math.min(t1 - t0, Math.max(0, t - t0));
+  return layoutCues(words, style, t1).map((c) => ({
+    start: clamp(c.start),
+    end: clamp(c.end),
+    lines: c.lines.map((l) => l.map((w) => ({ ...w, start: clamp(w.start), end: clamp(w.end) }))),
+  })).filter((c) => c.end > c.start);
+};
+
+/** Shift part-relative cues back to source time (preview of a part on the full video). */
+export const shiftCues = (cues: Cue[], byMs: Ms): Cue[] =>
+  cues.map((c) => ({
+    start: c.start + byMs,
+    end: c.end + byMs,
+    lines: c.lines.map((l) => l.map((w) => ({ ...w, start: w.start + byMs, end: w.end + byMs }))),
+  }));
+
+const layoutCues = (words: CueWord[], style: CueStyle, durationMs: Ms): Cue[] => {
   const cues: Cue[] = [];
   let lines: CueWord[][] = [[]];
   const lineLen = (l: CueWord[]) => l.reduce((n, w, k) => n + w.text.length + (k ? 1 : 0), 0);

@@ -71,7 +71,7 @@ export interface ProjectView {
 export interface PatchProjectReq {
   name?: string;
   archived?: boolean;
-  /** Shallow-merged per section (audio / framing / style). */
+  /** Shallow-merged per section (audio / framing / style / series / cover). */
   settings?: { [K in keyof ProjectSettings]?: Partial<ProjectSettings[K]> };
 }
 
@@ -144,6 +144,22 @@ export interface CompareClip {
 
 export interface StartRenderReq {
   outputs: ("captioned" | "clean" | "srt" | "vtt")[];
+  /**
+   * Render the series plan of settings.series (one artifact per part, «1/3»
+   * badge per numbering). The job result then has `series.parts`
+   * (RenderPartResult[]); a plan with no cuts renders the whole clip.
+   */
+  series?: boolean;
+}
+
+export interface RenderPartResult {
+  index: number;
+  total: number;
+  startMs: Ms;
+  endMs: Ms;
+  /** output kind → artifact url */
+  outputs: Record<string, string>;
+  badge: string | null;
 }
 
 export interface ProviderInfo {
