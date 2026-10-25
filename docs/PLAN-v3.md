@@ -1,6 +1,7 @@
 # Titler — следующий этап: исполнители, публичный API, серии, обложки, публикация
 
 2026-10-25. Продолжение [PLAN-v2.md](PLAN-v2.md) после переноса на мак ([mac.md](mac.md)).
+Как вести работу (n5 → m3max): [HANDOFF-v3.md](HANDOFF-v3.md).
 Ресёрч: [cloud ASR](../bench/REPORT-cloud-asr.md), [облачные исполнители и шлюз](../bench/REPORT-cloud-exec.md),
 [площадки публикации](../bench/REPORT-publishing.md).
 
