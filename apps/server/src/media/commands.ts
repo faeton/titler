@@ -254,3 +254,55 @@ export const renderArgs = (p: RenderPlan, enc: Encoder): string[] => {
   }
   return args;
 };
+
+// ---- covers ---------------------------------------------------------------------
+
+/** Edge density per frame of the proxy at `fps` (signalstats YAVG of edgedetect), written to `metaFile`. */
+export const frameScanArgs = (proxy: string, metaFile: string, fps = 4): string[] => [
+  "-hide_banner", "-nostdin", "-v", "error",
+  "-i", proxy,
+  "-vf", `fps=${fps},scale=320:-2,format=gray,edgedetect=low=0.08:high=0.2,signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=${filterPath(metaFile)}`,
+  "-f", "null", "-",
+];
+
+/** Parse metadata=print output: "frame:N pts:… pts_time:T" followed by "lavfi.signalstats.YAVG=V". */
+export const parseFrameScan = (text: string): { t: number; sharpness: number }[] => {
+  const out: { t: number; sharpness: number }[] = [];
+  let t: number | null = null;
+  for (const line of text.split("\n")) {
+    const pt = /pts_time:([\d.]+)/.exec(line);
+    if (pt) t = Math.round(Number(pt[1]) * 1000);
+    const v = /lavfi\.signalstats\.YAVG=([\d.]+)/.exec(line);
+    if (v && t !== null) {
+      out.push({ t, sharpness: Number(v[1]) });
+      t = null;
+    }
+  }
+  return out;
+};
+
+/** Small JPEG of the proxy at `atMs` (cover suggestions). */
+export const frameThumbArgs = (proxy: string, atMs: number, out: string): string[] => [
+  "-hide_banner", "-nostdin", "-v", "error", "-y",
+  "-ss", (atMs / 1000).toFixed(3), "-i", proxy,
+  "-frames:v", "1", "-vf", "scale=-2:320", "-q:v", "5", out,
+];
+
+/**
+ * One cover frame from the *source* at `atMs` (accurate input seek), framed
+ * like the render, with the title / badge ASS burned in, as JPEG.
+ */
+export const coverArgs = (
+  p: { src: string; atMs: number; probe: Pick<Probe, "width" | "height">; framing: Framing; out: { w: number; h: number }; ass: string | null; fontsDir: string; dest: string },
+  quality = 2,
+): string[] => {
+  let graph = framingGraph(p.framing, p.probe, p.out);
+  graph += p.ass ? `;[base]ass=filename=${filterPath(p.ass)}:fontsdir=${filterPath(p.fontsDir)}[v]` : ";[base]null[v]";
+  return [
+    "-hide_banner", "-nostdin", "-v", "error", "-y",
+    "-ss", (p.atMs / 1000).toFixed(3), "-i", p.src,
+    "-filter_complex", graph,
+    "-map", "[v]", "-frames:v", "1", "-q:v", String(quality),
+    p.dest,
+  ];
+};

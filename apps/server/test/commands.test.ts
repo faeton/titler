@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { compileCues, DEFAULT_FRAMING, DEFAULT_STYLE, docFromHypothesis, toAss } from "@titler/core";
 import { loadConfig } from "../src/config.js";
 import { artifactKey, canonical } from "../src/context.js";
-import { cropRect, filterPath, fitLong, framingGraph, mixArgs, outputSize, parseLoudnorm, proxyArgs, renderArgs } from "../src/media/commands.js";
+import { coverArgs, cropRect, filterPath, fitLong, frameScanArgs, framingGraph, mixArgs, outputSize, parseFrameScan, parseLoudnorm, proxyArgs, renderArgs } from "../src/media/commands.js";
 import { parseProbe } from "../src/media/probe.js";
 import { pickExcerpts } from "../src/pipeline/audio.js";
 import { stamp } from "../src/pipeline/render.js";
@@ -160,6 +160,26 @@ describe("ffmpeg commands", () => {
     const whole = renderArgs({ ...plan(null), range: null }, SW);
     expect(whole).not.toContain("-ss");
     expect(whole).not.toContain("-t");
+  });
+
+  it("cover: accurate seek on the source, framing + ASS, JPEG quality", () => {
+    const args = coverArgs({
+      src: "/s.mov", atMs: 12_345, probe: { width: 1376, height: 1840 }, framing: DEFAULT_FRAMING, out: { w: 1080, h: 1920 }, ass: "/o/cover.ass", fontsDir: "/f", dest: "/o/c.jpg",
+    }, 4);
+    const s = args.join(" ");
+    expect(s).toContain("-ss 12.345 -i /s.mov -filter_complex");
+    expect(args[args.indexOf("-filter_complex") + 1]).toBe("[0:v]crop=1036:1840:170:0,scale=1080:1920:flags=lanczos,setsar=1[base];[base]ass=filename='/o/cover.ass':fontsdir='/f'[v]");
+    expect(s).toMatch(/-map \[v\] -frames:v 1 -q:v 4 \/o\/c\.jpg$/);
+    const yt = coverArgs({ src: "/s.mov", atMs: 0, probe: { width: 1376, height: 1840 }, framing: { ...DEFAULT_FRAMING, ratio: "16:9" }, out: { w: 1280, h: 720 }, ass: null, fontsDir: "/f", dest: "/o/y.jpg" });
+    expect(yt[yt.indexOf("-filter_complex") + 1]).toBe("[0:v]crop=1376:774:0:534,scale=1280:720:flags=lanczos,setsar=1[base];[base]null[v]");
+  });
+
+  it("frame scan: edge density per frame, parsed from metadata=print", () => {
+    expect(frameScanArgs("/p.mp4", "/a/scan.txt").join(" ")).toContain("fps=4,scale=320:-2,format=gray,edgedetect");
+    expect(parseFrameScan("frame:0    pts:0       pts_time:0\nlavfi.signalstats.YAVG=12.9398\nframe:1    pts:1       pts_time:0.25\nlavfi.signalstats.YAVG=3.5\n")).toEqual([
+      { t: 0, sharpness: 12.9398 },
+      { t: 250, sharpness: 3.5 },
+    ]);
   });
 
   it("escapes filter paths and refuses quotes", () => {

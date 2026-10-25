@@ -14,15 +14,17 @@ import {
   type ProviderInfo,
   type StartAsrReq,
   type StartCompareReq,
+  type StartCoverReq,
   type StartRenderReq,
 } from "@titler/core";
 import { loadConfig, type Config } from "./config.js";
-import { abs, artifactUrl, type Ctx } from "./context.js";
+import { abs, artifactUrl, errMsg, type Ctx } from "./context.js";
 import { encoderName } from "./media/commands.js";
 import { openDb } from "./db.js";
 import { Scheduler } from "./jobs.js";
 import { compare, enhance } from "./pipeline/audio.js";
 import { analyze, ingest, projectArtifact } from "./pipeline/ingest.js";
+import { cover, coverSuggestions, frameThumb } from "./pipeline/cover.js";
 import { render } from "./pipeline/render.js";
 import { applyOps, asr, align, HttpError, LOCAL_ASR, saveTranscript } from "./pipeline/transcript.js";
 import { sendFile } from "./serve.js";
@@ -200,6 +202,7 @@ export const buildApp = async (opts: BuildOpts = {}): Promise<App> => {
   sched.register("enhance", (j) => enhance(ctx, j));
   sched.register("compare", (j) => compare(ctx, j));
   sched.register("render", (j) => render(ctx, j));
+  sched.register("cover", (j) => cover(ctx, j));
 
   fastify.setErrorHandler((err: Error & { statusCode?: number; validation?: unknown }, _req, reply) => {
     if (err instanceof HttpError) return reply.code(err.status).send({ error: err.message, ...err.extra });
@@ -317,6 +320,53 @@ export const buildApp = async (opts: BuildOpts = {}): Promise<App> => {
     const outputs = Array.isArray(body.outputs) && body.outputs.length ? body.outputs : ["captioned", "srt"];
     if (outputs.some((o) => !["captioned", "clean", "srt", "vtt"].includes(o))) throw new HttpError(400, "bad outputs");
     return sched.enqueue(p.id, "render", { outputs, ...(body.series ? { series: true } : {}) });
+  });
+  fastify.post("/api/projects/:id/cover", async (req: IdReq) => {
+    const p = project(req.params.id);
+    const body = (req.body ?? {}) as Partial<StartCoverReq>;
+    if (!(typeof body.atMs === "number" && Number.isFinite(body.atMs) && body.atMs >= 0)) throw new HttpError(400, "atMs");
+    if (body.format !== undefined && body.format !== "vertical" && body.format !== "youtube") throw new HttpError(400, "format");
+    const part = body.part;
+    if (part !== undefined && !(Number.isInteger(part.index) && Number.isInteger(part.total) && part.index >= 0 && part.index < part.total && part.total <= 200)) {
+      throw new HttpError(400, "part");
+    }
+    if (body.title !== undefined && body.title !== null && !(typeof body.title === "string" && body.title.length <= 120)) throw new HttpError(400, "title");
+    if (body.badge !== undefined && typeof body.badge !== "boolean") throw new HttpError(400, "badge");
+    return sched.enqueue(
+      p.id,
+      "cover",
+      {
+        atMs: Math.round(body.atMs),
+        format: body.format ?? "vertical",
+        ...(part ? { part: { index: part.index, total: part.total } } : {}),
+        ...(body.title !== undefined ? { title: body.title } : {}),
+        ...(body.badge !== undefined ? { badge: body.badge } : {}),
+      },
+      { priority: 5 },
+    );
+  });
+  fastify.get("/api/projects/:id/cover/suggestions", async (req: FastifyRequest<{ Params: { id: string }; Querystring: { startMs?: string; endMs?: string } }>) => {
+    const p = project(req.params.id);
+    if (!p.probe) throw new HttpError(409, "project not ingested");
+    const start = Math.max(0, Number(req.query.startMs ?? 0) || 0);
+    const end = Math.min(p.probe.durationMs, Number(req.query.endMs ?? p.probe.durationMs) || p.probe.durationMs);
+    if (!(end > start)) throw new HttpError(400, "range");
+    try {
+      return await coverSuggestions(ctx, p, start, end);
+    } catch (e) {
+      throw new HttpError(409, errMsg(e));
+    }
+  });
+  fastify.route({
+    method: ["GET", "HEAD"],
+    url: "/api/projects/:id/frame/:file",
+    handler: async (req: FastifyRequest<{ Params: { id: string; file: string } }>, reply) => {
+      const p = project(req.params.id);
+      const m = /^(\d+)\.jpg$/.exec(req.params.file);
+      if (!m || !p.probe) throw new HttpError(404, "not found");
+      const file = await frameThumb(ctx, p, Math.min(Number(m[1]), p.probe.durationMs - 1));
+      return sendFile(req, reply, file, { cache: "private, max-age=31536000, immutable" });
+    },
   });
   fastify.get("/api/providers", async () => providers());
   fastify.get("/api/jobs", async (req: FastifyRequest<{ Querystring: { projectId?: string; active?: string } }>) =>

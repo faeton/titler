@@ -240,6 +240,46 @@ describe("pipeline with fake workers", () => {
     expect(ar.parts.every((x) => x.badge === null && x.endMs - x.startMs <= 5000)).toBe(true);
   });
 
+  it("covers: suggestions, thumbnails, JPEG from the source per part", async () => {
+    const { app, dir } = await start();
+    const clip = makeClip(join(dir, "clip.mp4"), 4);
+    const v = await waitJobs(app, (await upload(app, readFileSync(clip), "clip.mp4", 256 * 1024)).project.id);
+    const pid = v.project.id;
+    const sug = await api<{ suggestions: number[]; fps: number }>(app, "GET", `/api/projects/${pid}/cover/suggestions?startMs=0&endMs=4000`);
+    expect(sug.status).toBe(200);
+    expect(sug.json.suggestions.length).toBeGreaterThanOrEqual(2);
+    expect(sug.json.suggestions.every((t) => t >= 0 && t < 4000)).toBe(true);
+    const thumb = await app.fastify.inject({ method: "GET", url: `/api/projects/${pid}/frame/${sug.json.suggestions[0]}.jpg` });
+    expect(thumb.statusCode).toBe(200);
+    expect(thumb.headers["content-type"]).toBe("image/jpeg");
+    expect((await app.fastify.inject({ method: "GET", url: `/api/projects/${pid}/frame/x.jpg` })).statusCode).toBe(404);
+
+    await api(app, "PATCH", `/api/projects/${pid}`, { settings: { cover: { title: "Тестовая обложка" } } });
+    expect((await api(app, "POST", `/api/projects/${pid}/cover`, { atMs: -1 })).status).toBe(400);
+    const job = await api<{ id: string }>(app, "POST", `/api/projects/${pid}/cover`, { atMs: 1500, format: "vertical", part: { index: 1, total: 3 } });
+    expect(job.status).toBe(200);
+    const yt = await api<{ id: string }>(app, "POST", `/api/projects/${pid}/cover`, { atMs: 1500, format: "youtube" });
+    // Request values win over settings (what the preview showed).
+    const own = await api<{ id: string }>(app, "POST", `/api/projects/${pid}/cover`, { atMs: 500, part: { index: 0, total: 2 }, title: "Своя", badge: false });
+    const fin = await waitJobs(app, pid);
+    const r = fin.jobs.find((j) => j.id === job.json.id)!;
+    expect(r.status, r.error ?? "").toBe("done");
+    expect(r.result).toMatchObject({ format: "vertical", atMs: 1500, part: { index: 1, total: 3 } });
+    expect(r.result!.url).toMatch(/_cover_p2of3_vertical_[0-9a-f]{8}\.jpg$/);
+    const img = await app.fastify.inject({ method: "GET", url: r.result!.url as string });
+    expect(img.headers["content-type"]).toBe("image/jpeg");
+    // JPEG SOF0/SOF2 marker carries height then width.
+    const sof = img.rawPayload.findIndex((b, i) => b === 0xff && (img.rawPayload[i + 1] === 0xc0 || img.rawPayload[i + 1] === 0xc2));
+    expect([img.rawPayload.readUInt16BE(sof + 5), img.rawPayload.readUInt16BE(sof + 7)]).toEqual([1920, 1080]);
+    const ytr = fin.jobs.find((j) => j.id === yt.json.id)!;
+    expect(ytr.status, ytr.error ?? "").toBe("done");
+    const art = fin.artifacts.find((a) => a.kind === "cover" && a.meta.format === "youtube")!;
+    expect(art.meta).toMatchObject({ width: 1280, height: 720, badge: null, title: "Тестовая обложка" });
+    expect(fin.artifacts.find((a) => a.kind === "cover" && a.meta.atMs === 1500 && a.meta.format === "vertical")!.meta.badge).toBe("2/3");
+    expect(fin.jobs.find((j) => j.id === own.json.id)!.status).toBe("done");
+    expect(fin.artifacts.find((a) => a.kind === "cover" && a.meta.atMs === 500)!.meta).toMatchObject({ title: "Своя", badge: null });
+  });
+
   it("drops a late alignment result when the words changed meanwhile", async () => {
     const { app, dir } = await start({ workerEnv: { FAKE_ALIGN_DELAY_MS: "400" } });
     const clip = makeClip(join(dir, "clip.mp4"), 2);
