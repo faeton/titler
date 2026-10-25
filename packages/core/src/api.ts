@@ -162,6 +162,32 @@ export interface RenderPartResult {
   badge: string | null;
 }
 
+// ---- Covers -----------------------------------------------------------------------
+// POST /api/projects/:id/cover               StartCoverReq → Job (result { url, key, format, atMs, part, bytes })
+// GET  /api/projects/:id/cover/suggestions?startMs=&endMs=  → CoverSuggestions
+// GET  /api/projects/:id/frame/:ms.jpg       small proxy frame (suggestion thumbnails)
+//
+// The cover is taken from the source (not the proxy) with the project's
+// framing, title from settings.cover, «1/3» badge for series parts.
+
+export interface StartCoverReq {
+  atMs: Ms;
+  /** "vertical" 1080×1920 (Reels / Shorts) or "youtube" 1280×720. */
+  format?: "vertical" | "youtube";
+  /** Series part the cover is for (badge text); omit for a whole-clip cover. */
+  part?: { index: number; total: number };
+  /** As shown in the preview; default settings.cover (the debounced settings PATCH may not have landed yet). */
+  title?: string | null;
+  badge?: boolean;
+}
+
+export interface CoverSuggestions {
+  /** Suggested frame times, source ms, sorted. */
+  suggestions: Ms[];
+  /** Scan rate the sharpness was measured at. */
+  fps: number;
+}
+
 export interface ProviderInfo {
   id: string;
   kind: "asr" | "review";
