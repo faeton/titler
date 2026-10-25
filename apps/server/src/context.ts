@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import type { Artifact, ArtifactKind } from "@titler/core";
+import type { Auth } from "./auth.js";
 import type { Config } from "./config.js";
 import type { Scheduler } from "./jobs.js";
 import type { Store } from "./store.js";
@@ -20,6 +21,7 @@ export interface Ctx {
   sched: Scheduler;
   workers: WorkerManager;
   log: Logger;
+  auth: Auth;
 }
 
 // ---- content-addressed artifacts -------------------------------------------------

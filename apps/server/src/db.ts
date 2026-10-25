@@ -76,6 +76,27 @@ const MIGRATIONS: string[] = [
   CREATE INDEX jobs_status ON jobs(status, resource_class, priority, created_at);
   CREATE INDEX jobs_project ON jobs(project_id, created_at);
   `,
+  `
+  CREATE TABLE auth_keys (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,            -- 'owner' (logs in, makes sessions) | 'device' (Bearer)
+    name TEXT NOT NULL,
+    hash TEXT NOT NULL UNIQUE,     -- sha256 of the secret; the secret itself is shown once
+    created_at TEXT NOT NULL,
+    last_used_at TEXT,
+    revoked_at TEXT
+  );
+  CREATE TABLE sessions (
+    hash TEXT PRIMARY KEY,         -- sha256 of the cookie value
+    key_id TEXT NOT NULL REFERENCES auth_keys(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  );
+  CREATE TABLE settings_kv (
+    k TEXT PRIMARY KEY,
+    v TEXT NOT NULL
+  );
+  `,
 ];
 
 export type Db = DatabaseSync;

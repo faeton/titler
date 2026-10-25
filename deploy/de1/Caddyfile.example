@@ -1,0 +1,42 @@
+# Public gateway for Titler (PLAN-v3 §2, step A). Not deployed automatically.
+# Caddy on de1 terminates TLS (automatic certificates) and proxies over the
+# tailnet to the Titler server (n5 or the Mac). Nothing at home listens on the
+# internet; no Cloudflare on this path (uploads, large media).
+#
+# Environment (e.g. /etc/caddy/titler.env, loaded by the caddy unit):
+#   TITLER_PUBLIC_HOST     public name, e.g. titler.example.org (DNS A/AAAA → de1)
+#   TITLER_UPSTREAM        the server's tailnet HTTPS URL as served by `tailscale serve --https=8772`
+#                          on the Titler box, e.g. https://<box>.<tailnet>.ts.net:8772
+#   TITLER_GATEWAY_SECRET  long random string; the same value goes into the server's
+#                          TITLER_GATEWAY_SECRET (n5: ~/.config/titler/server.env)
+#
+# The server then asks every request that carries the secret header to log in
+# (owner session or device key); /s/<token> signed links and /api/health stay public.
+
+{$TITLER_PUBLIC_HOST} {
+	encode zstd gzip
+
+	# Upload chunks are 4 MB; leave headroom, refuse anything bigger at the edge.
+	request_body {
+		max_size 8MB
+	}
+
+	reverse_proxy {$TITLER_UPSTREAM} {
+		# Sets (replaces) the header, so a client can't supply its own.
+		header_up X-Titler-Gateway {$TITLER_GATEWAY_SECRET}
+		header_up Host {upstream_hostport}
+		# Stream media and job polling without buffering.
+		flush_interval -1
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/titler.log
+	}
+}

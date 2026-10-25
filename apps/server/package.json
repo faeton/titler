@@ -8,7 +8,8 @@
     "start": "tsx src/main.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "e2e": "tsx scripts/e2e.ts"
+    "e2e": "tsx scripts/e2e.ts",
+    "auth": "tsx scripts/auth.ts"
   },
   "dependencies": {
     "@titler/core": "workspace:*",

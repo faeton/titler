@@ -197,3 +197,38 @@ export interface ProviderInfo {
   models: string[];
   wordTimestamps: boolean;
 }
+
+// ---- Access (public gateway, PLAN-v3 §2) --------------------------------------------
+// Requests through the gateway (or every request with TITLER_AUTH=all) need a
+// session cookie or `Authorization: Bearer <device key>`; others get 401
+// { error: "login required" }. Owner tokens come from `pnpm --filter @titler/server auth owner`.
+// GET    /api/auth/me                 → AuthMe
+// POST   /api/auth/login              { token } → { ok, expiresAt, name }  (sets the session cookie)
+// POST   /api/auth/logout             → { ok }
+// GET    /api/auth/keys               → AuthKey[]          (local / owner session only)
+// POST   /api/auth/keys               { name } → AuthKey & { secret }  (secret shown once)
+// DELETE /api/auth/keys/:id           → AuthKey (revoked)
+// POST   /api/artifacts/:key/sign     { file?, ttlSec? (60..604800, default 3600) } → SignedLink
+// GET    /s/<token>[/<name>]          the signed file, no credentials (Range supported)
+
+export interface AuthMe {
+  /** This request had to authenticate (came through the gateway, or TITLER_AUTH=all). */
+  required: boolean;
+  authenticated: boolean;
+  via: "local" | "session" | "key" | null;
+  name: string | null;
+}
+
+export interface AuthKey {
+  id: string;
+  kind: "owner" | "device";
+  name: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface SignedLink {
+  url: string;
+  expiresAt: string;
+}

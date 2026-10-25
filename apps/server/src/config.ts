@@ -8,6 +8,14 @@ export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..
 
 export type WorkerRole = "analyze" | "asr" | "align" | "enhance";
 
+export interface AuthSettings {
+  /** gateway: only requests via the public gateway must log in; all: every request; off: none. */
+  mode: "gateway" | "all" | "off";
+  gatewaySecret: string | null;
+  corsOrigins: string[];
+  sessionDays: number;
+}
+
 export interface Config {
   repoRoot: string;
   dataDir: string;
@@ -29,6 +37,7 @@ export interface Config {
   concurrency: Record<string, number>;
   asrProvider: string;
   logLevel: string;
+  auth: AuthSettings;
 }
 
 const home = homedir();
@@ -105,6 +114,12 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env, overrides: Part
     concurrency: { media: 2, asr: 1, align: 1, enhance: 1, analyze: 1 },
     asrProvider: env.TITLER_ASR_PROVIDER ?? "faster-whisper",
     logLevel: env.TITLER_LOG_LEVEL ?? "info",
+    auth: {
+      mode: env.TITLER_AUTH === "all" || env.TITLER_AUTH === "off" ? env.TITLER_AUTH : "gateway",
+      gatewaySecret: env.TITLER_GATEWAY_SECRET || null,
+      corsOrigins: (env.TITLER_CORS_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+      sessionDays: Number(env.TITLER_SESSION_DAYS ?? 30),
+    },
   };
   return { ...cfg, ...overrides };
 };

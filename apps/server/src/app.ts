@@ -17,6 +17,7 @@ import {
   type StartCoverReq,
   type StartRenderReq,
 } from "@titler/core";
+import { applyCors, Auth, isHttps, isPublicPath, RateLimiter, readCookie, SESSION_COOKIE, sessionCookie, type KeyRow } from "./auth.js";
 import { loadConfig, type Config } from "./config.js";
 import { abs, artifactUrl, errMsg, type Ctx } from "./context.js";
 import { encoderName } from "./media/commands.js";
@@ -193,7 +194,8 @@ export const buildApp = async (opts: BuildOpts = {}): Promise<App> => {
     cfg.workerTimeoutMs,
   );
   const sched = new Scheduler(store, cfg.concurrency);
-  const ctx: Ctx = { cfg, store, sched, workers, log };
+  const auth = new Auth(db, cfg.auth);
+  const ctx: Ctx = { cfg, store, sched, workers, log, auth };
   sched.onError = (job, err) => log.error({ job: job.id, kind: job.kind, err: err instanceof Error ? err.message : err }, "job failed");
   sched.register("ingest", (j) => ingest(ctx, j));
   sched.register("analyze", (j) => analyze(ctx, j));
@@ -209,6 +211,67 @@ export const buildApp = async (opts: BuildOpts = {}): Promise<App> => {
     const status = err.statusCode && err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 500;
     if (status >= 500) log.error(err);
     return reply.code(status).send({ error: err.message });
+  });
+
+  // ---- access (see auth.ts) ----
+  const limiter = new RateLimiter();
+  type Access = { gateway: boolean; mustAuth: boolean; who: { via: "session" | "key"; key: KeyRow } | null };
+  const access = new WeakMap<FastifyRequest, Access>();
+  const accessOf = (req: FastifyRequest): Access => access.get(req) ?? { gateway: false, mustAuth: false, who: null };
+  fastify.addHook("onRequest", async (req, reply) => {
+    const gw = auth.viaGateway(req);
+    if (gw === "forged") return reply.code(401).send({ error: "bad gateway credentials" });
+    const cors = applyCors(req, reply, cfg.auth.corsOrigins);
+    if (req.method === "OPTIONS" && cors) return reply.code(204).send();
+    const mustAuth = cfg.auth.mode === "all" || (cfg.auth.mode === "gateway" && gw);
+    if (mustAuth) {
+      const ip = auth.clientIp(req, gw);
+      if (!limiter.take(`all:${ip}`, 1200)) return reply.code(429).send({ error: "too many requests" });
+      if (req.url.split("?")[0] === "/api/auth/login" && !limiter.take(`login:${ip}`, 10)) return reply.code(429).send({ error: "too many login attempts" });
+    }
+    const who = auth.identify(req);
+    access.set(req, { gateway: gw, mustAuth, who });
+    if (mustAuth && !who && !isPublicPath(req.method, req.url)) return reply.code(401).send({ error: "login required" });
+  });
+  /** Key management: from this box / the tailnet, or an owner session — never with a device key. */
+  const requireOwner = (req: FastifyRequest) => {
+    const a = accessOf(req);
+    if (a.mustAuth && a.who?.via !== "session") throw new HttpError(403, "owner session required");
+  };
+
+  fastify.post("/api/auth/login", async (req, reply) => {
+    const token = (req.body as { token?: unknown } | null)?.token;
+    const s = typeof token === "string" ? auth.login(token.trim()) : null;
+    if (!s) throw new HttpError(401, "wrong token");
+    reply.header("Set-Cookie", sessionCookie(s.cookie, cfg.auth.sessionDays * 86_400, isHttps(req, accessOf(req).gateway)));
+    return { ok: true, expiresAt: s.expiresAt, name: s.key.name };
+  });
+  fastify.post("/api/auth/logout", async (req, reply) => {
+    const c = readCookie(req, SESSION_COOKIE);
+    if (c) auth.logout(c);
+    reply.header("Set-Cookie", sessionCookie("", 0, isHttps(req, accessOf(req).gateway)));
+    return { ok: true };
+  });
+  fastify.get("/api/auth/me", async (req) => {
+    const a = accessOf(req);
+    return { required: a.mustAuth, authenticated: !a.mustAuth || !!a.who, via: a.who?.via ?? (a.mustAuth ? null : "local"), name: a.who?.key.name ?? null };
+  });
+  fastify.get("/api/auth/keys", async (req) => {
+    requireOwner(req);
+    return auth.listKeys();
+  });
+  fastify.post("/api/auth/keys", async (req) => {
+    requireOwner(req);
+    const name = (req.body as { name?: unknown } | null)?.name;
+    if (typeof name !== "string" || !name.trim() || name.length > 80) throw new HttpError(400, "name");
+    const { key, secret } = auth.createKey("device", name.trim());
+    return { ...key, secret };
+  });
+  fastify.delete("/api/auth/keys/:id", async (req: FastifyRequest<{ Params: { id: string } }>) => {
+    requireOwner(req);
+    if (!auth.getKey(req.params.id)) throw new HttpError(404, "key not found");
+    auth.revokeKey(req.params.id);
+    return auth.getKey(req.params.id);
   });
 
   // Raw upload chunks are streamed straight to disk, never buffered.
@@ -391,6 +454,30 @@ export const buildApp = async (opts: BuildOpts = {}): Promise<App> => {
     const file = req.params.file ? basename(req.params.file) : basename(a.path);
     return sendFile(req, reply, join(dir, file), { cache: "private, max-age=31536000, immutable", downloadName: file });
   };
+  // Signed, expiring link to one artifact file (for services that fetch media by URL).
+  fastify.post("/api/artifacts/:key/sign", async (req: FastifyRequest<{ Params: { key: string } }>) => {
+    const a = store.getArtifact(req.params.key);
+    if (!a) throw new HttpError(404, "artifact not found");
+    const body = (req.body ?? {}) as { file?: unknown; ttlSec?: unknown };
+    const file = typeof body.file === "string" && body.file ? basename(body.file) : basename(a.path);
+    const ttl = body.ttlSec === undefined ? 3600 : Number(body.ttlSec);
+    if (!(Number.isInteger(ttl) && ttl >= 60 && ttl <= 7 * 86_400)) throw new HttpError(400, "ttlSec must be 60..604800");
+    if (!existsSync(join(abs(cfg, dirname(a.path)), file))) throw new HttpError(404, "file not found");
+    const { token, expiresAt } = auth.sign(a.key, file, ttl);
+    return { url: `/s/${token}/${encodeURIComponent(file)}`, expiresAt };
+  });
+  const signedFile = async (req: FastifyRequest<{ Params: { token: string } }>, reply: FastifyReply) => {
+    const v = auth.verify(req.params.token);
+    if (v === "bad") throw new HttpError(403, "invalid link");
+    if (v === "expired") throw new HttpError(410, "link expired");
+    const a = store.getArtifact(v.key);
+    if (!a) throw new HttpError(404, "not found");
+    return sendFile(req, reply, join(abs(cfg, dirname(a.path)), basename(v.file)), { cache: "no-store", downloadName: v.file });
+  };
+  // The trailing file name is cosmetic (some fetchers want an extension); the token decides.
+  fastify.route({ method: ["GET", "HEAD"], url: "/s/:token", handler: signedFile });
+  fastify.route({ method: ["GET", "HEAD"], url: "/s/:token/:name", handler: signedFile });
+
   fastify.route({ method: ["GET", "HEAD"], url: "/api/artifacts/:key", handler: artifactFile });
   fastify.route({ method: ["GET", "HEAD"], url: "/api/artifacts/:key/:file", handler: artifactFile });
   fastify.route({
@@ -407,7 +494,7 @@ export const buildApp = async (opts: BuildOpts = {}): Promise<App> => {
 
   // ---- web app (SPA) ----
   fastify.setNotFoundHandler(async (req, reply) => {
-    if (req.url.startsWith("/api/") || (req.method !== "GET" && req.method !== "HEAD")) {
+    if (req.url.startsWith("/api/") || req.url.startsWith("/s/") || (req.method !== "GET" && req.method !== "HEAD")) {
       return reply.code(404).send({ error: "not found" });
     }
     if (!existsSync(join(cfg.webDist, "index.html"))) return reply.code(404).send({ error: "web app not built" });
