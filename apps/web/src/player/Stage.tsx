@@ -1,9 +1,9 @@
-import type { Framing, ProjectView, SubtitleStyle, TranscriptDoc } from "@titler/core";
-import type { CSSProperties, PointerEvent } from "react";
+import type { Cue, Framing, ProjectView, SubtitleStyle, TranscriptDoc } from "@titler/core";
+import type { CSSProperties, PointerEvent, ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { centre, cropRect, fitBox, outAspect, srcAspect } from "../lib/framing";
 import { BlurBackdrop } from "./BlurBackdrop";
-import { CaptionOverlay, useCues } from "./CaptionOverlay";
+import { BadgeOverlay, CaptionOverlay, useCues } from "./CaptionOverlay";
 import type { Player } from "./player";
 import { usePlayerState } from "./player";
 
@@ -19,6 +19,12 @@ interface Props {
   showCaptions?: boolean;
   showSafe?: boolean;
   onCrop?: (cx: number, cy: number) => void;
+  /** Series preview: per-part cues in source time instead of the whole-clip layout. */
+  cues?: Cue[] | null;
+  /** Series numbering badges, source time. */
+  badges?: { startMs: number; endMs: number; text: string }[];
+  /** Extra overlay inside the frame (cover guides), given the frame size in px. */
+  overlay?: (box: { w: number; h: number }) => ReactNode;
 }
 
 const useSize = () => {
@@ -35,7 +41,7 @@ const useSize = () => {
   return [ref, size] as const;
 };
 
-export const Stage = ({ view, player, doc, framing, style, mode = "preview", showCaptions = true, showSafe = false, onCrop }: Props) => {
+export const Stage = ({ view, player, doc, framing, style, mode = "preview", showCaptions = true, showSafe = false, onCrop, cues: cuesOverride, badges, overlay }: Props) => {
   const [wrap, size] = useSize();
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const [meta, setMeta] = useState<{ w: number; h: number } | null>(null);
@@ -43,7 +49,8 @@ export const Stage = ({ view, player, doc, framing, style, mode = "preview", sho
   const p = view.project.probe;
   const src = srcAspect(p ? p : meta ? { width: meta.w, height: meta.h } : null);
   const durationMs = view.project.probe?.durationMs ?? player.duration;
-  const cues = useCues(doc, style, durationMs);
+  const wholeCues = useCues(doc, style, durationMs);
+  const cues = cuesOverride ?? wholeCues;
 
   const videoRef = useCallback(
     (v: HTMLVideoElement | null) => {
@@ -144,6 +151,8 @@ export const Stage = ({ view, player, doc, framing, style, mode = "preview", sho
             <div className="safe" style={{ right: 0, width: "15%", top: "45%", height: "35%" }} />
           </>
         ) : null}
+        {!crop && badges?.length ? <BadgeOverlay badges={badges} time={time} height={box.h} /> : null}
+        {!crop && overlay ? overlay(box) : null}
         {!crop && showCaptions ? <CaptionOverlay cues={cues} style={style} time={time} height={box.h} onOverflow={(o) => o !== overflow && setOverflow(o)} /> : null}
       </div>
       {!crop && showCaptions && overflow ? (

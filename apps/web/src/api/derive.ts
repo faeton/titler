@@ -74,7 +74,24 @@ export interface RenderOutput {
   bytes: number | null;
   /** Transcript revision the render was made from (meta.transcriptRev), if known. */
   transcriptRev: number | null;
+  /** Series part (meta.part), null for a whole-clip output. */
+  part: OutputPart | null;
 }
+
+export interface OutputPart {
+  index: number;
+  total: number;
+  startMs: number;
+  endMs: number;
+  destination: string;
+}
+
+const partOf = (a: Artifact): OutputPart | null => {
+  const p = a.meta.part as Partial<OutputPart> | undefined;
+  return p && typeof p.index === "number" && typeof p.total === "number"
+    ? { index: p.index, total: p.total, startMs: Number(p.startMs ?? 0), endMs: Number(p.endMs ?? 0), destination: String(p.destination ?? "") }
+    : null;
+};
 
 const kindOf = (a: Artifact): RenderOutput["kind"] => {
   const o = str(a.meta.output);
@@ -109,8 +126,44 @@ export const renderOutputs = (view: ProjectView | null): RenderOutput[] => {
         createdAt: a.createdAt,
         bytes: typeof a.meta.bytes === "number" ? a.meta.bytes : null,
         transcriptRev: typeof a.meta.transcriptRev === "number" ? a.meta.transcriptRev : null,
+        part: partOf(a),
       };
   });
+};
+
+export interface OutputGroup {
+  /** "" = whole-clip outputs. */
+  key: string;
+  part: OutputPart | null;
+  outputs: RenderOutput[];
+}
+
+/** Outputs grouped by series part (same destination / cut), newest group first, parts in order. */
+export const groupOutputs = (outs: RenderOutput[]): OutputGroup[] => {
+  const groups = new Map<string, OutputGroup>();
+  for (const o of outs) {
+    const p = o.part;
+    const key = p ? `${p.destination}:${p.total}:${p.index}:${p.startMs}:${p.endMs}` : "";
+    const g = groups.get(key) ?? { key, part: p, outputs: [] };
+    g.outputs.push(o);
+    groups.set(key, g);
+  }
+  const newest = (g: OutputGroup) => g.outputs.reduce((m, o) => (o.createdAt > m ? o.createdAt : m), "");
+  // A series render writes its parts within seconds: order series by their newest part, parts by index.
+  const series = (g: OutputGroup) => (g.part ? `${g.part.destination}:${g.part.total}` : "");
+  const seriesNewest = new Map<string, string>();
+  for (const g of groups.values()) {
+    const k = series(g);
+    const n = newest(g);
+    if (n > (seriesNewest.get(k) ?? "")) seriesNewest.set(k, n);
+  }
+  return [...groups.values()].sort(
+    (a, b) =>
+      (seriesNewest.get(series(b)) ?? "").localeCompare(seriesNewest.get(series(a)) ?? "") ||
+      series(a).localeCompare(series(b)) ||
+      (a.part?.index ?? 0) - (b.part?.index ?? 0) ||
+      newest(b).localeCompare(newest(a)),
+  );
 };
 
 export type ProjectState = "processing" | "ready" | "exported" | "new";

@@ -120,6 +120,13 @@ export const safeCut = (t: Ms, words: SeriesWord[]): Ms => {
   return Math.round(t - w.start <= w.end - t ? w.start : w.end);
 };
 
+/** Where a hand-dragged cut lands: the nearest pause within `radiusMs`, else just outside the word under it. */
+export const snapCut = (t: Ms, candidates: CutCandidate[], words: SeriesWord[], radiusMs = 1500): Ms => {
+  let best: CutCandidate | null = null;
+  for (const c of candidates) if (Math.abs(c.at - t) <= radiusMs && (!best || Math.abs(c.at - t) < Math.abs(best.at - t))) best = c;
+  return best ? best.at : safeCut(t, words);
+};
+
 /** [t0, t1) per part in source ms. Part k > 0 starts `overlapMs` before its cut. */
 export const seriesParts = (cuts: Ms[], durationMs: Ms, overlapMs = 0): { startMs: Ms; endMs: Ms }[] => {
   const bounds = [0, ...cuts, durationMs];

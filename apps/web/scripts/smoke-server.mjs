@@ -1,7 +1,9 @@
 // Smoke against the real server through the Vite proxy (pnpm dev + apps/server on :8772).
 //   node scripts/smoke-server.mjs <clip.mp4> [baseUrl] [outDir]
 // Uploads the clip (chunked), waits for ingest + ASR, edits a word (then undoes
-// it), checks audio/frame/export on the first project that has a transcript, and
+// it), checks audio/frame/export on the first project that has a transcript —
+// including the series panel (custom 10 s parts: timeline, «1/N» preview badge,
+// dragging a cut, «Авто») — restores that project's series settings and
 // deletes the uploaded project at the end.
 import { chromium } from "playwright-core";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -17,6 +19,7 @@ const apiGet = (p) => fetch(`${base}/api${p}`).then((r) => r.json());
 
 const browser = await chromium.connect(process.env.PW_WS ?? "ws://127.0.0.1:30150/");
 let uploaded = null;
+let restoreSeries = null;
 try {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 800 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const page = await ctx.newPage();
@@ -86,8 +89,52 @@ try {
     check(heads.every((s) => s === 200), `export: links resolve (${heads.join(",")})`);
   }
   await page.screenshot({ path: `${out}/6-export.png` });
+
+  // ---- series ----
+  const before = await apiGet(`/projects/${pid}`);
+  restoreSeries = { pid, series: before.project.settings.series };
+  const D = before.project.probe.durationMs;
+  await page.locator(".dests button", { hasText: "Своя" }).tap();
+  await page.locator(".field input[type=range]").fill("10");
+  const n = Math.ceil(D / 10_000);
+  await page.waitForFunction((k) => document.querySelectorAll(".series-tl .part").length >= k, n, { timeout: 5000 }).catch(() => {});
+  const parts = await page.locator(".series-tl .part").count();
+  check(parts >= n && parts <= n + 2, `series: ${parts} parts on the timeline for ${(D / 1000).toFixed(1)} s at 10 s (≥ ${n})`);
+  const btn = await page.locator("button.primary.big").textContent();
+  check(/Экспортировать \d+ част/.test(btn ?? ""), `series: export button says "${btn}"`);
+  await page.locator(".pbar .btn.primary").tap(); // play from wherever, then seek to the start
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const v = document.querySelector("video");
+    v.pause();
+    v.currentTime = 0.5;
+  });
+  await page.waitForTimeout(500);
+  const badge = await page.locator(".stage .badge").textContent().catch(() => null);
+  check(badge === `1/${parts}`, `series: preview badge "${badge}"`);
+  await page.screenshot({ path: `${out}/7-series.png` });
+  // Drag the first cut 2 s to the right: stored as a hand cut, snapped out of words.
+  const cut = page.locator(".series-tl .cut").first();
+  const tl = await page.locator(".series-tl").boundingBox();
+  const cb = await cut.boundingBox();
+  const x0 = cb.x + cb.width / 2;
+  const y0 = cb.y + cb.height / 2;
+  await cut.dispatchEvent("pointerdown", { pointerId: 1, clientX: x0, clientY: y0, isPrimary: true });
+  for (let k = 1; k <= 5; k++) await cut.dispatchEvent("pointermove", { pointerId: 1, clientX: x0 + (k * (tl.width * 2000)) / D / 5, clientY: y0, isPrimary: true });
+  await cut.dispatchEvent("pointerup", { pointerId: 1, clientX: x0 + (tl.width * 2000) / D, clientY: y0, isPrimary: true });
+  await page.waitForTimeout(1200);
+  const moved = (await apiGet(`/projects/${pid}`)).project.settings.series.cuts.custom;
+  check(Array.isArray(moved) && moved.length >= 1, `series: dragged cut saved (${JSON.stringify(moved)})`);
+  await page.getByRole("button", { name: "Авто" }).tap();
+  await page.waitForTimeout(1200);
+  check(!(await apiGet(`/projects/${pid}`)).project.settings.series.cuts.custom, "series: «Авто» drops the hand cuts");
+  await page.screenshot({ path: `${out}/8-series-auto.png` });
+
   check(errors.length === 0, `no page errors ${errors.join(" | ")}`);
 } finally {
+  if (restoreSeries) {
+    await fetch(`${base}/api/projects/${restoreSeries.pid}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings: { series: restoreSeries.series } }) });
+  }
   if (uploaded) await fetch(`${base}/api/projects/${uploaded}`, { method: "DELETE" }).then((r) => console.log("cleanup delete", r.status));
   await browser.close();
 }

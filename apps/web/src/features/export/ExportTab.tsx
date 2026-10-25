@@ -1,8 +1,10 @@
-import { allWords } from "@titler/core";
+import { allWords, effectiveTimes, SERIES_PRESETS, type SeriesDestination, type TranscriptDoc } from "@titler/core";
 import { useEffect, useMemo, useState } from "react";
-import { api, isActive, latestJob, renderOutputs, type OutputKind, type RenderOutput } from "../../api";
+import { api, groupOutputs, isActive, latestJob, renderOutputs, type OutputKind, type RenderOutput } from "../../api";
 import { fmtBytes, fmtDate } from "../../lib/format";
 import { useProjectCtx } from "../project/useProject";
+import type { SeriesPlanView } from "./series";
+import { SeriesPanel } from "./SeriesPanel";
 
 const OUTPUTS: [OutputKind, string][] = [
   ["captioned", "Видео с субтитрами"],
@@ -22,7 +24,20 @@ const canShareFiles = (() => {
 
 const SHARE_KEY = "titler.export.outputs";
 
-export const ExportTab = () => {
+/** Caption text of the words whose midpoint is in [t0, t1) (whole clip when no range). */
+const captionOf = (doc: TranscriptDoc, durationMs: number, range?: { startMs: number; endMs: number }): string => {
+  const words = allWords(doc);
+  const times = effectiveTimes(words, durationMs);
+  const keep = new Set(
+    words.filter((w, i) => !w.hidden && (!range || ((times[i]!.start + times[i]!.end) / 2 >= range.startMs && (times[i]!.start + times[i]!.end) / 2 < range.endMs))).map((w) => w.id),
+  );
+  return doc.paragraphs
+    .map((p) => p.words.filter((w) => keep.has(w.id)).map((w) => w.text).join(" "))
+    .filter(Boolean)
+    .join("\n\n");
+};
+
+export const ExportTab = ({ plan }: { plan: SeriesPlanView | null }) => {
   const { view, run, id, rev } = useProjectCtx();
   const [sel, setSel] = useState<OutputKind[]>(() => {
     try {
@@ -40,48 +55,49 @@ export const ExportTab = () => {
   }, [sel]);
   const job = latestJob(view, "render");
   const busy = !!job && isActive(job);
-  const outputs = useMemo(() => renderOutputs(view), [view]);
+  const groups = useMemo(() => groupOutputs(renderOutputs(view)), [view]);
   const [err, setErr] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<number | null>(null);
+  const durationMs = view?.project.probe?.durationMs ?? 0;
+  const parts = plan && plan.parts.length > 1 ? plan.parts : null;
+  const over = !!parts && plan!.maxPartMs !== null && parts.some((p) => p.endMs - p.startMs > plan!.maxPartMs!);
 
-  const captionText = useMemo(
-    () =>
-      rev
-        ? rev.doc.paragraphs
-            .map((p) => p.words.filter((w) => !w.hidden).map((w) => w.text).join(" "))
-            .filter(Boolean)
-            .join("\n\n")
-        : "",
-    [rev],
-  );
+  // One caption per part, «(1/3)» appended, as creators label series.
+  const captions = useMemo(() => {
+    if (!rev) return [];
+    if (!parts) return [captionOf(rev.doc, durationMs)];
+    return parts.map((p, i) => `${captionOf(rev.doc, durationMs, p)} (${i + 1}/${parts.length})`.trim());
+  }, [rev, parts, durationMs]);
   const hasWords = rev ? allWords(rev.doc).length > 0 : false;
 
   const start = async () => {
     setErr(null);
     try {
-      await run(() => api.startRender(id, { outputs: sel }));
+      await run(() => api.startRender(id, { outputs: sel, series: true }));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
   };
 
-  const copy = async () => {
+  const copy = async (k: number) => {
+    const text = captions[k] ?? "";
     try {
-      await navigator.clipboard.writeText(captionText);
+      await navigator.clipboard.writeText(text);
     } catch {
       const ta = document.createElement("textarea");
-      ta.value = captionText;
+      ta.value = text;
       document.body.appendChild(ta);
       ta.select();
       document.execCommand("copy");
       ta.remove();
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1800);
+    setCopied(k);
+    setTimeout(() => setCopied(null), 1800);
   };
 
   return (
     <div className="scroll">
+      {plan ? <SeriesPanel plan={plan} /> : null}
       <div className="section">
         <h2>Что сделать</h2>
         {OUTPUTS.map(([k, l]) => (
@@ -113,20 +129,33 @@ export const ExportTab = () => {
             </div>
           </div>
         ) : (
-          <button className="btn primary big" disabled={!sel.length || !view?.urls.proxy} onClick={() => void start()}>
-            Экспортировать
+          <button className="btn primary big" disabled={!sel.length || !view?.urls.proxy || over} onClick={() => void start()}>
+            {parts ? `Экспортировать ${parts.length} ${parts.length < 5 ? "части" : "частей"}` : "Экспортировать"}
           </button>
         )}
+        {over ? <p className="hint">Часть длиннее лимита площадки — сдвиньте разрезы или нажмите «Авто».</p> : null}
         {job?.status === "error" ? <div className="banner err">Экспорт не удался: {job.error}</div> : null}
         {err ? <div className="banner err">{err}</div> : null}
       </div>
 
       <div className="section">
         <h2>Готовые файлы</h2>
-        {outputs.length ? (
+        {groups.length ? (
           <div className="outs">
-            {outputs.map((o) => (
-              <OutputRow key={o.url + o.createdAt} o={o} currentRev={rev?.rev ?? 0} />
+            {groups.map((g) => (
+              <div className="out-group" key={g.key}>
+                {g.part ? (
+                  <h3>
+                    {SERIES_PRESETS[g.part.destination as SeriesDestination]?.label ?? g.part.destination} · часть {g.part.index + 1} из {g.part.total}
+                    <span className="hint"> · {fmtSpan(g.part.startMs, g.part.endMs)}</span>
+                  </h3>
+                ) : groups.some((x) => x.part) ? (
+                  <h3>Целиком</h3>
+                ) : null}
+                {g.outputs.map((o) => (
+                  <OutputRow key={o.url + o.createdAt} o={o} currentRev={rev?.rev ?? 0} />
+                ))}
+              </div>
             ))}
           </div>
         ) : (
@@ -136,14 +165,20 @@ export const ExportTab = () => {
 
       <div className="section">
         <h2>Подпись к публикации</h2>
-        <button className="btn" disabled={!captionText} onClick={() => void copy()}>
-          {copied ? "Скопировано ✓" : "Скопировать текст"}
-        </button>
-        <p className="hint">Текст без слов, убранных из субтитров.</p>
+        <div className="row">
+          {captions.map((c, k) => (
+            <button key={k} className="btn" disabled={!c} onClick={() => void copy(k)}>
+              {copied === k ? "Скопировано ✓" : captions.length > 1 ? `Часть ${k + 1}` : "Скопировать текст"}
+            </button>
+          ))}
+        </div>
+        <p className="hint">Текст без слов, убранных из субтитров{captions.length > 1 ? "; у каждой части свой, с «(1/3)» в конце" : ""}.</p>
       </div>
     </div>
   );
 };
+
+const fmtSpan = (a: number, b: number) => `${(a / 1000).toFixed(1)}–${(b / 1000).toFixed(1)} с`;
 
 const OutputRow = ({ o, currentRev }: { o: RenderOutput; currentRev: number }) => {
   const [file, setFile] = useState<File | "loading" | null>(null);

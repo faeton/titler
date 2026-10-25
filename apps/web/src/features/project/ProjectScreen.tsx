@@ -6,6 +6,7 @@ import { PlayerBar } from "../../player/PlayerBar";
 import { Stage } from "../../player/Stage";
 import { AudioTab } from "../audio/AudioTab";
 import { ExportTab } from "../export/ExportTab";
+import { useSeriesPlan } from "../export/series";
 import { FrameTab, type FrameUi } from "../frame/FrameTab";
 import { TextTab } from "../transcript/TextTab";
 import { StatusChips } from "./StatusChips";
@@ -23,6 +24,9 @@ export const ProjectScreen = ({ id, tab }: { id: string; tab: TabId }) => {
   const ctx = useProject(id);
   const { view, player } = ctx;
   const [frameUi, setFrameUi] = useState<FrameUi>({ crop: false, safe: true });
+  const plan = useSeriesPlan(view, ctx.rev?.doc ?? null);
+  // On the export tab the preview shows each part as it will render (its own cue layout + «1/3»).
+  const seriesPreview = tab === "export" && plan && plan.parts.length > 1 ? plan : null;
 
   // Player shortcuts only outside text input / the editor.
   useEffect(() => {
@@ -63,6 +67,8 @@ export const ProjectScreen = ({ id, tab }: { id: string; tab: TabId }) => {
               mode={tab === "frame" && frameUi.crop ? "crop" : "preview"}
               showSafe={tab === "frame" && frameUi.safe}
               onCrop={(cx, cy) => ctx.patchSettings({ framing: { keyframes: [{ t: 0, cx, cy }] } })}
+              cues={seriesPreview?.cues ?? null}
+              badges={seriesPreview?.badges}
             />
           </div>
           <nav className="tabs" aria-label="Этапы">
@@ -76,7 +82,7 @@ export const ProjectScreen = ({ id, tab }: { id: string; tab: TabId }) => {
             {tab === "audio" && <AudioTab />}
             {tab === "text" && <TextTab />}
             {tab === "frame" && <FrameTab ui={frameUi} setUi={setFrameUi} />}
-            {tab === "export" && <ExportTab />}
+            {tab === "export" && <ExportTab plan={plan} />}
           </div>
           <div className="dock">
             <div ref={ctx.setDock} style={{ display: "contents" }} />

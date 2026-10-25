@@ -9,6 +9,7 @@ import {
   allWords,
   applyAlignment,
   compileCues,
+  compilePartCues,
   DEFAULT_AUDIO,
   DEFAULT_COVER,
   DEFAULT_FRAMING,
@@ -18,6 +19,9 @@ import {
   effectiveTimes,
   newId,
   reconcile,
+  resolveCuts,
+  seriesParts,
+  seriesWords,
   toSrt,
   toVtt,
   type AlignWindow,
@@ -279,25 +283,35 @@ const finish = (p: MockProject, j: MockProject["jobs"][number]) => {
     case "render": {
       const outputs = j.params.outputs as string[];
       const rev = latest(p);
-      const cues = rev ? compileCues(rev.doc, p.project.settings.style, DURATION) : [];
+      const { style, series } = p.project.settings;
       const base = p.project.name.replace(/\.[^.]+$/, "");
-      for (const o of outputs) {
-        const text = o === "srt" ? toSrt(cues) : o === "vtt" ? toVtt(cues) : null;
-        p.artifacts.push({
-          key: newId(),
-          projectId: id,
-          kind: text === null ? "render" : "subs",
-          path: `renders/${o}.${text === null ? "mp4" : o}`,
-          meta: {
-            output: o,
-            url: text === null ? `${MEDIA}/proxy.mp4` : `data:text/plain;charset=utf-8,${encodeURIComponent(text)}`,
-            fileName: `${base}-${o}.${text === null ? "mp4" : o}`,
-            bytes: text === null ? 20_579_413 : text.length,
-            transcriptRev: rev?.rev ?? 0,
-          },
-          createdAt: now(),
-        });
-      }
+      // Same plan as the server (core.resolveCuts); mock has no VAD.
+      const ranges = j.params.series
+        ? seriesParts(resolveCuts(series, seriesWords(rev?.doc ?? null, DURATION), [], DURATION).cuts, DURATION, series.overlapMs)
+        : [{ startMs: 0, endMs: DURATION }];
+      const multi = ranges.length > 1;
+      ranges.forEach((r, index) => {
+        const cues = !rev ? [] : multi ? compilePartCues(rev.doc, style, DURATION, r) : compileCues(rev.doc, style, DURATION);
+        const tag = multi ? `_p${index + 1}of${ranges.length}` : "";
+        for (const o of outputs) {
+          const text = o === "srt" ? toSrt(cues) : o === "vtt" ? toVtt(cues) : null;
+          p.artifacts.push({
+            key: newId(),
+            projectId: id,
+            kind: text === null ? "render" : "subs",
+            path: `renders/${o}${tag}.${text === null ? "mp4" : o}`,
+            meta: {
+              output: o,
+              url: text === null ? `${MEDIA}/proxy.mp4` : `data:text/plain;charset=utf-8,${encodeURIComponent(text)}`,
+              fileName: `${base}-${o}${tag}.${text === null ? "mp4" : o}`,
+              bytes: text === null ? Math.round((20_579_413 * (r.endMs - r.startMs)) / DURATION) : text.length,
+              transcriptRev: rev?.rev ?? 0,
+              ...(multi ? { part: { index, total: ranges.length, ...r, destination: series.destination, manual: false } } : {}),
+            },
+            createdAt: now(),
+          });
+        }
+      });
       break;
     }
   }

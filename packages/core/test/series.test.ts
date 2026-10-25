@@ -9,6 +9,7 @@ import {
   planSeries,
   resolveCuts,
   safeCut,
+  snapCut,
   seriesBadge,
   seriesParts,
   seriesWords,
@@ -106,6 +107,14 @@ describe("planSeries", () => {
   it("no transcript: cuts in VAD silence", () => {
     const vad = [{ startMs: 0, endMs: 30_000 }, { startMs: 31_000, endMs: 64_000 }];
     expect(planSeries([], vad, 64_000, { maxPartMs: 59_000 })).toEqual([30_500]);
+  });
+
+  it("snapCut sticks to a nearby pause, else steps out of the word", () => {
+    const ws = [{ start: 0, end: 900 }, { start: 1500, end: 5000 }, { start: 5100, end: 9000 }];
+    const cands = cutCandidates(ws, [], 9000);
+    expect(cands.map((c) => c.at)).toEqual([1200]);
+    expect(snapCut(2400, cands, ws)).toBe(1200);
+    expect(snapCut(4000, cands, ws)).toBe(5000);
   });
 
   it("safeCut moves a point out of a word", () => {

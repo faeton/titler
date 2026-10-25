@@ -1,4 +1,4 @@
-import { compileCues, LOOKS, type Cue, type SubtitleStyle, type TranscriptDoc } from "@titler/core";
+import { BADGE, compileCues, LOOKS, type Cue, type SubtitleStyle, type TranscriptDoc } from "@titler/core";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
 // Browser rendering of the same cue plan the ASS writer burns in (core/cues.ts
@@ -100,6 +100,19 @@ export const CaptionOverlay = ({
           </span>
         </span>
       ))}
+    </div>
+  );
+};
+
+/** Series numbering («1/3») with the ASS writer's geometry (core BADGE / badgeMetrics). */
+export const BadgeOverlay = ({ badges, time, height }: { badges: { startMs: number; endMs: number; text: string }[]; time: number; height: number }) => {
+  const b = badges.find((x) => time >= x.startMs && time < x.endMs);
+  if (!b || height <= 0) return null;
+  const size = height * BADGE.fontSizeRel;
+  const pad = size * BADGE.padRel;
+  return (
+    <div className="badge" style={{ top: height * BADGE.top - pad, fontSize: size, padding: pad, background: cssColor(BADGE.box), color: BADGE.text }} aria-hidden>
+      {b.text}
     </div>
   );
 };
