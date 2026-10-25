@@ -1105,3 +1105,20 @@ input.text {
   border-radius: 7px;
   background: var(--surface-2);
 }
+
+/* ---- access ------------------------------------------------------------------- */
+
+.login {
+  max-width: 420px;
+}
+.secret {
+  display: grid;
+  gap: 8px;
+}
+.secret code {
+  font-size: 13px;
+  word-break: break-all;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}

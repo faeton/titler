@@ -25,6 +25,7 @@ import {
   toSrt,
   toVtt,
   type AlignWindow,
+  type AuthKey,
   type Artifact,
   type CompareClip,
   type Job,
@@ -342,6 +343,8 @@ const finish = (p: MockProject, j: MockProject["jobs"][number]) => {
   }
 };
 
+const mockKeys: AuthKey[] = [];
+
 const placeholder = (label: string, w: number, h: number) =>
   `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="#3a3f47"/><text x="50%" y="50%" fill="#fff" font-family="sans-serif" font-size="${Math.round(w / 6)}" text-anchor="middle">${label}</text></svg>`,
@@ -555,6 +558,23 @@ export const mockApi: Api = {
   coverSuggestions: (_id, startMs, endMs) =>
     respond(() => ({ suggestions: [0.1, 0.3, 0.5, 0.7, 0.9].map((f) => Math.round(startMs + f * (endMs - startMs))), fps: 4 })),
   frameUrl: (_id, atMs) => placeholder(`${(atMs / 1000).toFixed(1)} с`, 180, 320),
+  authMe: () => respond(() => ({ required: false, authenticated: true, via: "local" as const, name: null })),
+  login: () => respond(() => undefined),
+  logout: () => respond(() => undefined),
+  listKeys: () => respond(() => mockKeys.filter(Boolean)),
+  createKey: (name) =>
+    respond(() => {
+      const key = { id: newId(), kind: "device" as const, name, createdAt: now(), lastUsedAt: null, revokedAt: null };
+      mockKeys.unshift(key);
+      return { ...key, secret: `tk_mock_${newId()}` };
+    }),
+  revokeKey: (id) =>
+    respond(() => {
+      const k = mockKeys.find((x) => x.id === id);
+      if (!k) throw new ApiError(404, { error: "key not found" });
+      k.revokedAt = now();
+      return k;
+    }),
   cancelJob: (jobId) =>
     respond(() => {
       for (const p of Object.values(db.projects)) {

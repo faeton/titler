@@ -32,6 +32,9 @@ export const ProjectsScreen = () => {
       <header className="topbar">
         <h1>Titler</h1>
         {MOCK ? <span className="chip warn">демо-данные</span> : null}
+        <a className="btn ghost" href="#/access">
+          Доступ
+        </a>
       </header>
       <main className="scroll">
         <div className="projects">

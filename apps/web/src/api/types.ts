@@ -1,4 +1,6 @@
 import type {
+  AuthKey,
+  AuthMe,
   CoverSuggestions,
   CreateUploadReq,
   Job,
@@ -42,7 +44,17 @@ export interface Api {
   /** Small proxy frame for suggestion thumbnails. */
   frameUrl(id: string, atMs: number): string;
   cancelJob(jobId: string): Promise<Job>;
+
+  authMe(): Promise<AuthMe>;
+  login(token: string): Promise<void>;
+  logout(): Promise<void>;
+  listKeys(): Promise<AuthKey[]>;
+  createKey(name: string): Promise<AuthKey & { secret: string }>;
+  revokeKey(id: string): Promise<AuthKey>;
 }
+
+/** Fired on window when the server answers 401 "login required". */
+export const AUTH_EVENT = "titler:login-required";
 
 export class ApiError extends Error {
   constructor(
