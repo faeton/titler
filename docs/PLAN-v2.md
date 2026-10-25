@@ -143,7 +143,8 @@ review mode that jumps between disputes.
 **P6 — advanced.** Waveform zoom + timing handles, regional audio presets with crossfades,
 target-speaker mode (enrolment clip), cut-from-video with time map.
 
-**P7 — publishing.** Telegram Bot API (channel/group) first; Meta (IG Reels/Stories, FB Page)
+**P7 — publishing.** → detailed in [PLAN-v3.md](PLAN-v3.md) (series splitting, covers, execution providers, public API).
+Telegram Bot API (channel/group) first; Meta (IG Reels/Stories, FB Page)
 behind verified account capabilities; manual-completion path; per-destination idempotent jobs.
 
 ## Eval
