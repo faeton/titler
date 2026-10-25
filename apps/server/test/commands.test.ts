@@ -139,6 +139,29 @@ describe("ffmpeg commands", () => {
     expect(s).not.toContain("ass=");
   });
 
+  it("series part: accurate input seek on source and processed audio, for every encoder", () => {
+    const plan = (audio: string | null) => ({
+      src: "/s.mov", audio, hasSourceAudio: true, probe: { width: 1376, height: 1840 }, framing: DEFAULT_FRAMING, out: { w: 1080, h: 1920 },
+      captioned: { path: "/o/cap.mp4", ass: "/o/p2.ass" }, clean: null, fontsDir: "/f", range: { startMs: 31_250, endMs: 64_327 },
+    });
+    for (const enc of [HW, VT, SW]) {
+      const s = renderArgs(plan("/a.wav"), enc).join(" ");
+      expect(s).toContain("-ss 31.250 -i /s.mov -ss 31.250 -i /a.wav");
+      if (enc.kind === "vaapi") expect(s).toContain("-hwaccel_device va -ss 31.250 -i /s.mov");
+      // Seek on the inputs (output timestamps start at 0, so the part's re-based ASS lines up),
+      // length on the output.
+      const outSide = s.split(" -filter_complex ")[1]!;
+      expect(outSide).not.toContain("-ss");
+      expect(outSide).toMatch(/-t 33\.077 -movflags \+faststart \/o\/cap\.mp4$/);
+      const src = renderArgs(plan(null), enc).join(" ");
+      expect(src).toContain("-ss 31.250 -i /s.mov -filter_complex");
+      expect(src).toContain("-map [vc] -map 0:a:0");
+    }
+    const whole = renderArgs({ ...plan(null), range: null }, SW);
+    expect(whole).not.toContain("-ss");
+    expect(whole).not.toContain("-t");
+  });
+
   it("escapes filter paths and refuses quotes", () => {
     expect(filterPath("/a:b/c.ass")).toBe("'/a\\:b/c.ass'");
     expect(() => filterPath("/it's.ass")).toThrow();

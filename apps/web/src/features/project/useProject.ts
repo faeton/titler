@@ -30,10 +30,14 @@ export const useProjectCtx = () => {
   return c;
 };
 
+const SECTIONS = ["audio", "framing", "style", "series", "cover"] as const;
+
 const merge = (s: ProjectSettings, p: SettingsPatch): ProjectSettings => ({
   audio: { ...s.audio, ...p.audio },
   framing: { ...s.framing, ...p.framing },
   style: { ...s.style, ...p.style },
+  series: { ...s.series, ...p.series },
+  cover: { ...s.cover, ...p.cover },
 });
 
 export const useProject = (id: string): ProjectCtx => {
@@ -79,12 +83,9 @@ export const useProject = (id: string): ProjectCtx => {
   const patchSettings = useCallback(
     (p: SettingsPatch) => {
       const q = pending.current;
-      pending.current = {
-        audio: p.audio || q.audio ? { ...q.audio, ...p.audio } : undefined,
-        framing: p.framing || q.framing ? { ...q.framing, ...p.framing } : undefined,
-        style: p.style || q.style ? { ...q.style, ...p.style } : undefined,
-      };
-      for (const k of ["audio", "framing", "style"] as const) if (!pending.current[k]) delete pending.current[k];
+      const next: Record<string, unknown> = {};
+      for (const k of SECTIONS) if (p[k] || q[k]) next[k] = { ...q[k], ...p[k] };
+      pending.current = next as SettingsPatch;
       setView((v) => (v ? { ...v, project: { ...v.project, settings: merge(v.project.settings, p) } } : v));
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(async () => {

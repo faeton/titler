@@ -205,7 +205,17 @@ export interface RenderPlan {
   captioned: { path: string; ass: string } | null;
   clean: { path: string } | null;
   fontsDir: string;
+  /** Render only [startMs, endMs) of the source (series part); output time starts at 0. */
+  range?: { startMs: number; endMs: number } | null;
 }
+
+/**
+ * Accurate input seek: when transcoding, ffmpeg decodes from the previous
+ * keyframe and drops frames before -ss. The length is cut on the *output*
+ * (-t): an input -t lets one extra frame of a VFR source through.
+ */
+const seek = (r: RenderPlan["range"]): string[] => (r ? ["-ss", (r.startMs / 1000).toFixed(3)] : []);
+const trim = (r: RenderPlan["range"]): string[] => (r ? ["-t", ((r.endMs - r.startMs) / 1000).toFixed(3)] : []);
 
 export const renderArgs = (p: RenderPlan, enc: Encoder): string[] => {
   const outs: { label: string; path: string; chain: string }[] = [];
@@ -227,8 +237,9 @@ export const renderArgs = (p: RenderPlan, enc: Encoder): string[] => {
     graph += `;[base]${outs[0]!.chain}[${outs[0]!.label}]`;
   }
 
-  const args = [...common, ...hwInput(enc), "-i", p.src];
-  if (p.audio) args.push("-i", p.audio);
+  const args = [...common, ...hwInput(enc), ...seek(p.range), "-i", p.src];
+  // The processed audio is trimmed by the same seek, so both inputs start at the part's t0.
+  if (p.audio) args.push(...seek(p.range), "-i", p.audio);
   args.push("-filter_complex", graph);
   const audioMap = p.audio ? ["-map", "1:a:0"] : p.hasSourceAudio ? ["-map", "0:a:0"] : [];
   for (const o of outs) {
@@ -236,6 +247,7 @@ export const renderArgs = (p: RenderPlan, enc: Encoder): string[] => {
       "-map", `[${o.label}]`, ...audioMap,
       ...videoCodec(enc, "final"),
       ...(audioMap.length ? ["-c:a", "aac", "-b:a", "192k", "-ar", "48000"] : []),
+      ...trim(p.range),
       "-movflags", "+faststart",
       o.path,
     );

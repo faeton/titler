@@ -187,6 +187,59 @@ describe("pipeline with fake workers", () => {
     expect(summary.lastRenderUrl).toBeTruthy();
   });
 
+  it("renders a series: one artifact per part, re-based subtitles, «1/3» badge, limit check", async () => {
+    const { app, dir } = await start();
+    const clip = makeClip(join(dir, "clip.mp4"), 6);
+    const created = await upload(app, readFileSync(clip), "clip.mp4", 256 * 1024);
+    const v = await waitJobs(app, created.project.id);
+    const pid = v.project.id;
+    expect(v.project.settings.series.destination).toBe("telegram");
+    // Fake ASR words: я 100–300, приехал 320–800, Самоа. 1000–1600. Cut after «приехал».
+    const patch = await api<ProjectView>(app, "PATCH", `/api/projects/${pid}`, {
+      settings: { series: { destination: "custom", customMaxMs: 5000, cuts: { custom: [3000, 900] } } },
+    });
+    expect(patch.status).toBe(200);
+    expect(patch.json.project.settings.series.cuts).toEqual({ custom: [900, 3000] });
+    expect((await api(app, "PATCH", `/api/projects/${pid}`, { settings: { series: { destination: "myspace" } } })).status).toBe(400);
+
+    const job = await api<{ id: string }>(app, "POST", `/api/projects/${pid}/render`, { outputs: ["captioned", "clean", "srt"], series: true });
+    const fin = await waitJobs(app, pid, 120_000);
+    const rj = fin.jobs.find((j) => j.id === job.json.id)!;
+    expect(rj.status, rj.error ?? "").toBe("done");
+    const series = rj.result!.series as { parts: { index: number; startMs: number; endMs: number; badge: string | null; outputs: Record<string, string> }[]; maxPartMs: number; manual: boolean };
+    expect(series).toMatchObject({ maxPartMs: 5000, manual: true });
+    expect(series.parts.map((x) => [x.startMs, x.endMs, x.badge])).toEqual([[0, 900, "1/3"], [900, 3000, "2/3"], [3000, 6000, "3/3"]]);
+    expect(series.parts[1]!.outputs.captioned).toMatch(/_bold_p2of3_[0-9a-f]{8}\.mp4$/);
+    expect(series.parts[2]!.outputs.clean).toMatch(/_clean_p3of3_[0-9a-f]{8}\.mp4$/);
+    const val = rj.result!.validations as Record<string, { ok: boolean; durationMs: number; avDriftMs: number }>;
+    expect(val.captioned_p2).toMatchObject({ ok: true });
+    expect(Math.abs(val.captioned_p2!.durationMs - 2100)).toBeLessThanOrEqual(50);
+    expect(val.captioned_p2!.avDriftMs).toBeLessThanOrEqual(100);
+    const srt1 = (await app.fastify.inject({ method: "GET", url: series.parts[0]!.outputs.srt! })).body;
+    const srt2 = (await app.fastify.inject({ method: "GET", url: series.parts[1]!.outputs.srt! })).body;
+    expect(srt1).toContain("я приехал");
+    expect(srt1).not.toContain("Самоа");
+    expect(srt2).toMatch(/^1\n00:00:00,100 --> 00:00:00,700\nСамоа\.$/m);
+    const parts = fin.artifacts.filter((a) => a.kind === "render" && a.meta.part);
+    expect(parts).toHaveLength(6);
+    expect(parts.every((a) => (a.meta.part as { destination: string }).destination === "custom")).toBe(true);
+
+    // A hand-moved cut that makes a part longer than the limit is refused before encoding.
+    await api(app, "PATCH", `/api/projects/${pid}`, { settings: { series: { cuts: { custom: [500] } } } });
+    const bad = await api<{ id: string }>(app, "POST", `/api/projects/${pid}/render`, { outputs: ["srt"], series: true });
+    const fin2 = await waitJobs(app, pid);
+    expect(fin2.jobs.find((j) => j.id === bad.json.id)!.error).toMatch(/part 2 longer than 5 s/);
+
+    // No hand cuts → automatic plan (6 s at 5 s max → 2 parts, numbering hidden below 3 parts).
+    await api(app, "PATCH", `/api/projects/${pid}`, { settings: { series: { cuts: {} } } });
+    const auto = await api<{ id: string }>(app, "POST", `/api/projects/${pid}/render`, { outputs: ["srt"], series: true });
+    const fin3 = await waitJobs(app, pid);
+    const ar = fin3.jobs.find((j) => j.id === auto.json.id)!.result!.series as typeof series;
+    expect(ar.manual).toBe(false);
+    expect(ar.parts).toHaveLength(2);
+    expect(ar.parts.every((x) => x.badge === null && x.endMs - x.startMs <= 5000)).toBe(true);
+  });
+
   it("drops a late alignment result when the words changed meanwhile", async () => {
     const { app, dir } = await start({ workerEnv: { FAKE_ALIGN_DELAY_MS: "400" } });
     const clip = makeClip(join(dir, "clip.mp4"), 2);

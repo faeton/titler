@@ -17,6 +17,7 @@ export const JOB_LABEL: Record<JobKind, string> = {
   asr: "Распознавание",
   align: "Выравнивание",
   render: "Экспорт",
+  cover: "Обложка",
 };
 
 export const latestJob = (view: ProjectView | null, kind: JobKind): Job | undefined =>

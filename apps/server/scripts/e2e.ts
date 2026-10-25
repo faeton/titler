@@ -1,18 +1,62 @@
 // End-to-end smoke against a running server:
 //   pnpm --filter @titler/server start   (or dev), then
 //   pnpm --filter @titler/server e2e [file] [--base http://127.0.0.1:8772] [--compare]
+//                                   [--series <destination|max ms>] [--expect-parts N]
 // Uploads in chunks (with a simulated resume), waits for ingest + ASR, edits one
 // word, waits for local alignment, renders captioned + clean + SRT/VTT.
-import { open, stat } from "node:fs/promises";
+// --series renders the series plan instead (e.g. `--series ig_stories`, `stories`
+// or `--series 25000`), checks every part against the limit and, when the «1/3»
+// badge is on, that it is visible at the start of each part and gone after it.
+import { mkdir, open, stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
-import { toEditedParagraphs, type Job, type ProjectView, type SaveTranscriptRes, type UploadState } from "@titler/core";
-import { REPO_ROOT } from "../src/config.js";
+import {
+  SERIES_DESTINATIONS,
+  toEditedParagraphs,
+  type Job,
+  type ProjectView,
+  type RenderPartResult,
+  type SaveTranscriptRes,
+  type SeriesDestination,
+  type UploadState,
+} from "@titler/core";
+import { loadConfig, REPO_ROOT } from "../src/config.js";
+import { run } from "../src/media/run.js";
 
 const argv = process.argv.slice(2);
+const WITH_VALUE = ["--base", "--series", "--expect-parts"];
 const flag = (n: string) => argv.includes(n);
 const opt = (n: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : undefined);
 const BASE = opt("--base") ?? process.env.TITLER_BASE ?? "http://127.0.0.1:8772";
-const FILE = resolve(argv.find((a, i) => !a.startsWith("--") && !argv[i - 1]?.startsWith("--")) ?? resolve(REPO_ROOT, "bench/samples/video-34442_singular_display.mov"));
+const FILE = resolve(argv.find((a, i) => !a.startsWith("--") && !WITH_VALUE.includes(argv[i - 1] ?? "")) ?? resolve(REPO_ROOT, "bench/samples/video-34442_singular_display.mov"));
+const SERIES = opt("--series");
+const EXPECT_PARTS = opt("--expect-parts") ? Number(opt("--expect-parts")) : undefined;
+
+/** `stories` / `ig_stories` / `reels` / … or a max part length in ms (→ "custom"). */
+const seriesTarget = (v: string): { destination: SeriesDestination; customMaxMs?: number } => {
+  if (/^\d+$/.test(v)) return { destination: "custom", customMaxMs: Number(v) };
+  const alias: Record<string, SeriesDestination> = { stories: "ig_stories", reels: "ig_reels", shorts: "yt_shorts", fb: "fb_reels" };
+  const d = (alias[v] ?? v) as SeriesDestination;
+  if (!SERIES_DESTINATIONS.includes(d)) throw new Error(`--series: unknown destination ${v} (${SERIES_DESTINATIONS.join(", ")} or ms)`);
+  return { destination: d };
+};
+
+/**
+ * Mean absolute difference (0–255) between the captioned and clean renders in
+ * the badge band at the top of the frame, at time `atMs` of the part.
+ */
+const badgeBandDiff = async (ffmpeg: string, captionedUrl: string, cleanUrl: string, atMs: number, jpg?: string): Promise<number> => {
+  const t = (atMs / 1000).toFixed(3);
+  const band = "crop=iw*0.6:ih*0.07:iw*0.2:ih*0.12";
+  const { stderr } = await run(ffmpeg, [
+    "-hide_banner", "-nostdin", "-ss", t, "-i", BASE + captionedUrl, "-ss", t, "-i", BASE + cleanUrl,
+    "-filter_complex", `[0:v]${band},format=gray[a];[1:v]${band},format=gray[b];[a][b]blend=all_mode=difference,signalstats,metadata=print:key=lavfi.signalstats.YAVG`,
+    "-frames:v", "1", "-f", "null", "-",
+  ]);
+  if (jpg) await run(ffmpeg, ["-hide_banner", "-nostdin", "-y", "-ss", t, "-i", BASE + captionedUrl, "-frames:v", "1", "-q:v", "3", jpg]);
+  const m = /lavfi\.signalstats\.YAVG=([\d.]+)/.exec(stderr);
+  if (!m) throw new Error("badge check: no signalstats output");
+  return Number(m[1]);
+};
 const CHUNK = 4 * 1024 * 1024;
 const t0 = Date.now();
 const since = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
@@ -118,9 +162,17 @@ const main = async () => {
     compareInfo = `${done.status} ${JSON.stringify(done.result ?? done.error)}`;
   }
 
+  // ---- series plan ----
+  if (SERIES) {
+    const target = seriesTarget(SERIES);
+    // Drop hand-moved cuts so the run checks the automatic plan.
+    await call("PATCH", `/api/projects/${pid}`, { settings: { series: { ...target, cuts: {} } } });
+    log("series", JSON.stringify(target));
+  }
+
   // ---- render ----
   const outputs = v.transcript ? ["captioned", "clean", "srt", "vtt"] : ["clean"];
-  const rj = await call<Job>("POST", `/api/projects/${pid}/render`, { outputs });
+  const rj = await call<Job>("POST", `/api/projects/${pid}/render`, { outputs, ...(SERIES ? { series: true } : {}) });
   const tR = Date.now();
   const r = await waitJob(rj.id, "render");
   const renderS = (Date.now() - tR) / 1000;
@@ -140,8 +192,36 @@ const main = async () => {
   for (const [k, u] of Object.entries((r.result?.outputs ?? {}) as Record<string, string>)) console.log(`  ${k.padEnd(10)} ${BASE}${u}`);
   const val = (r.result?.validations ?? {}) as Record<string, { ok: boolean; durationMs: number; problems: string[] }>;
   for (const [k, x] of Object.entries(val)) console.log(`  validate ${k}: ok=${x.ok} duration=${x.durationMs}ms ${x.problems.join("; ")}`);
+  let failed = r.status !== "done";
+  const series = r.result?.series as { destination: string; maxPartMs: number | null; parts: RenderPartResult[] } | undefined;
+  if (series) {
+    const ff = loadConfig().ffmpeg;
+    const outDir = resolve(REPO_ROOT, "bench/runs/e2e");
+    await mkdir(outDir, { recursive: true });
+    console.log(`series         ${series.destination}, max ${series.maxPartMs ?? "-"} ms → ${series.parts.length} part(s)`);
+    for (const part of series.parts) {
+      const len = part.endMs - part.startMs;
+      const over = series.maxPartMs !== null && len > series.maxPartMs;
+      let badge = part.badge ? `badge «${part.badge}»` : "no badge";
+      if (part.badge && part.outputs.captioned && part.outputs.clean) {
+        const jpg = `${outDir}/${pid}_p${part.index + 1}of${part.total}.jpg`;
+        const on = await badgeBandDiff(ff, part.outputs.captioned, part.outputs.clean, 1000, jpg);
+        const offAt = Math.min(len - 500, 2500 + 1500);
+        const off = offAt > 3000 ? await badgeBandDiff(ff, part.outputs.captioned, part.outputs.clean, offAt) : null;
+        const visible = on > 4 && (off === null || off < 1);
+        badge += ` ${visible ? "visible" : "NOT VISIBLE"} (band diff ${on.toFixed(1)} at 1 s${off !== null ? `, ${off.toFixed(1)} at ${(offAt / 1000).toFixed(1)} s` : ""}) → ${jpg}`;
+        if (!visible) failed = true;
+      }
+      if (over) failed = true;
+      console.log(`  part ${part.index + 1}/${part.total}  ${(part.startMs / 1000).toFixed(2)}–${(part.endMs / 1000).toFixed(2)} s (${(len / 1000).toFixed(2)} s${over ? " OVER LIMIT" : ""})  ${badge}`);
+    }
+    if (EXPECT_PARTS !== undefined && series.parts.length !== EXPECT_PARTS) {
+      console.log(`  expected ${EXPECT_PARTS} part(s), got ${series.parts.length}`);
+      failed = true;
+    }
+  }
   console.log(`total          ${since()}`);
-  if (r.status !== "done") process.exit(1);
+  if (failed) process.exit(1);
 };
 
 main().catch((e) => {

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
   DEFAULT_AUDIO,
+  DEFAULT_COVER,
   DEFAULT_FRAMING,
+  DEFAULT_SERIES,
   DEFAULT_STYLE,
   type Artifact,
   type ArtifactKind,
@@ -54,6 +56,8 @@ export const defaultSettings = (): ProjectSettings => ({
   audio: { ...DEFAULT_AUDIO },
   framing: { ...DEFAULT_FRAMING, keyframes: [] },
   style: { ...DEFAULT_STYLE },
+  series: { ...DEFAULT_SERIES, numbering: { ...DEFAULT_SERIES.numbering }, cuts: {} },
+  cover: { ...DEFAULT_COVER },
 });
 
 const toProject = (r: Row): ProjectRow => ({

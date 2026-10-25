@@ -4,6 +4,7 @@ import { basename, dirname, join, normalize, resolve, sep } from "node:path";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import {
   DEFAULT_AUDIO,
+  SERIES_DESTINATIONS,
   type AudioChoice,
   type CompareClip,
   type PatchProjectReq,
@@ -123,11 +124,13 @@ const mergeSettings = (cur: ProjectSettings, patch: PatchProjectReq["settings"])
     audio: { ...cur.audio, ...(patch?.audio ?? {}) },
     framing: { ...cur.framing, ...(patch?.framing ?? {}) },
     style: { ...cur.style, ...(patch?.style ?? {}) },
+    series: { ...cur.series, ...(patch?.series ?? {}) },
+    cover: { ...cur.cover, ...(patch?.cover ?? {}) },
   };
   const bad = (m: string) => {
     throw new HttpError(400, m);
   };
-  const { audio, framing, style } = next;
+  const { audio, framing, style, series, cover } = next;
   if (!PRESETS.includes(audio.preset)) bad("audio.preset");
   if (!["dfn3", "mf2"].includes(audio.engine)) bad("audio.engine");
   if (audio.backgroundDb !== null && !(typeof audio.backgroundDb === "number" && audio.backgroundDb <= 0 && audio.backgroundDb >= -60)) bad("audio.backgroundDb");
@@ -146,6 +149,20 @@ const mergeSettings = (cur: ProjectSettings, patch: PatchProjectReq["settings"])
   if (!(typeof style.y === "number" && style.y >= 0 && style.y <= 1)) bad("style.y");
   if (typeof style.wordHighlight !== "boolean") bad("style.wordHighlight");
   if (style.watermark !== null && typeof style.watermark !== "string") bad("style.watermark");
+  if (!SERIES_DESTINATIONS.includes(series.destination)) bad("series.destination");
+  if (!(Number.isInteger(series.customMaxMs) && series.customMaxMs >= 5000 && series.customMaxMs <= 3_600_000)) bad("series.customMaxMs");
+  if (!(Number.isInteger(series.overlapMs) && series.overlapMs >= 0 && series.overlapMs <= 3000)) bad("series.overlapMs");
+  const n = series.numbering as Partial<typeof series.numbering> | undefined;
+  if (!n || typeof n.enabled !== "boolean" || !Number.isInteger(n.minParts) || n.minParts! < 2 || n.minParts! > 50 || !["short", "long"].includes(n.format!)) bad("series.numbering");
+  if (n!.durationMs !== null && !(Number.isInteger(n!.durationMs) && n!.durationMs! >= 500 && n!.durationMs! <= 60_000)) bad("series.numbering.durationMs");
+  if (!series.cuts || typeof series.cuts !== "object" || Array.isArray(series.cuts)) bad("series.cuts");
+  for (const [dest, cuts] of Object.entries(series.cuts)) {
+    if (!SERIES_DESTINATIONS.includes(dest as never)) bad("series.cuts destination");
+    if (!Array.isArray(cuts) || cuts.length > 200 || !cuts.every((c) => Number.isFinite(c) && c >= 0)) bad("series.cuts");
+    series.cuts[dest as keyof typeof series.cuts] = [...new Set(cuts.map(Math.round))].sort((a, b) => a - b);
+  }
+  if (cover.title !== null && !(typeof cover.title === "string" && cover.title.length <= 120)) bad("cover.title");
+  if (typeof cover.badge !== "boolean") bad("cover.badge");
   return next;
 };
 
@@ -299,7 +316,7 @@ export const buildApp = async (opts: BuildOpts = {}): Promise<App> => {
     const body = (req.body ?? {}) as Partial<StartRenderReq>;
     const outputs = Array.isArray(body.outputs) && body.outputs.length ? body.outputs : ["captioned", "srt"];
     if (outputs.some((o) => !["captioned", "clean", "srt", "vtt"].includes(o))) throw new HttpError(400, "bad outputs");
-    return sched.enqueue(p.id, "render", { outputs });
+    return sched.enqueue(p.id, "render", { outputs, ...(body.series ? { series: true } : {}) });
   });
   fastify.get("/api/providers", async () => providers());
   fastify.get("/api/jobs", async (req: FastifyRequest<{ Querystring: { projectId?: string; active?: string } }>) =>

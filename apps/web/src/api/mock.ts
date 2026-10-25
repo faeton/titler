@@ -10,7 +10,9 @@ import {
   applyAlignment,
   compileCues,
   DEFAULT_AUDIO,
+  DEFAULT_COVER,
   DEFAULT_FRAMING,
+  DEFAULT_SERIES,
   DEFAULT_STYLE,
   docFromHypothesis,
   effectiveTimes,
@@ -111,7 +113,13 @@ const baseProject = (id: string, name: string): Project => ({
   sourceSha256: id.padEnd(64, "0"),
   sourceName: name,
   probe: null,
-  settings: { audio: { ...DEFAULT_AUDIO }, framing: { ...DEFAULT_FRAMING }, style: { ...DEFAULT_STYLE } },
+  settings: {
+    audio: { ...DEFAULT_AUDIO },
+    framing: { ...DEFAULT_FRAMING },
+    style: { ...DEFAULT_STYLE },
+    series: { ...DEFAULT_SERIES, numbering: { ...DEFAULT_SERIES.numbering }, cuts: {} },
+    cover: { ...DEFAULT_COVER },
+  },
   transcriptRev: 0,
   archived: false,
 });
@@ -375,6 +383,9 @@ export const mockApi: Api = {
       if (s?.audio) p.project.settings.audio = { ...p.project.settings.audio, ...s.audio };
       if (s?.framing) p.project.settings.framing = { ...p.project.settings.framing, ...s.framing };
       if (s?.style) p.project.settings.style = { ...p.project.settings.style, ...s.style };
+      // Mock projects saved before series/covers existed.
+      p.project.settings.series = { ...DEFAULT_SERIES, ...p.project.settings.series, ...s?.series };
+      p.project.settings.cover = { ...DEFAULT_COVER, ...p.project.settings.cover, ...s?.cover };
       return view(p);
     }),
   deleteProject: (id) =>

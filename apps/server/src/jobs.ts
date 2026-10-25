@@ -8,6 +8,7 @@ import type { JobRow, Store } from "./store.js";
 export const RESOURCE_CLASS: Record<JobKind, string> = {
   ingest: "media",
   render: "media",
+  cover: "media",
   compare: "enhance",
   enhance: "enhance",
   analyze: "analyze",
