@@ -166,6 +166,34 @@ export const groupOutputs = (outs: RenderOutput[]): OutputGroup[] => {
   );
 };
 
+export interface CoverOutput {
+  url: string;
+  fileName: string;
+  format: "vertical" | "youtube";
+  atMs: number;
+  part: { index: number; total: number } | null;
+  bytes: number | null;
+  createdAt: string;
+}
+
+/** Cover JPEGs, newest first. */
+export const coverOutputs = (view: ProjectView | null): CoverOutput[] =>
+  (view?.artifacts ?? [])
+    .filter((a) => a.kind === "cover")
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((a) => {
+      const part = a.meta.part as { index?: number; total?: number } | null | undefined;
+      return {
+        url: artifactUrl(a),
+        fileName: str(a.meta.fileName) ?? (a.path.split("/").pop() || "cover.jpg"),
+        format: a.meta.format === "youtube" ? "youtube" : "vertical",
+        atMs: Number(a.meta.atMs ?? 0),
+        part: part && typeof part.index === "number" && typeof part.total === "number" ? { index: part.index, total: part.total } : null,
+        bytes: typeof a.meta.bytes === "number" ? a.meta.bytes : null,
+        createdAt: a.createdAt,
+      };
+    });
+
 export type ProjectState = "processing" | "ready" | "exported" | "new";
 
 export const summaryState = (s: ProjectSummary): ProjectState =>

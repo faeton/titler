@@ -1,4 +1,5 @@
 import type {
+  CoverSuggestions,
   CreateUploadReq,
   Job,
   PatchProjectReq,
@@ -8,6 +9,7 @@ import type {
   SaveTranscriptRes,
   StartAsrReq,
   StartCompareReq,
+  StartCoverReq,
   StartRenderReq,
   TranscriptOpsReq,
   TranscriptRevision,
@@ -35,6 +37,10 @@ export interface Api {
   startAsr(id: string, req: StartAsrReq): Promise<Job>;
   startCompare(id: string, req: StartCompareReq): Promise<Job>;
   startRender(id: string, req: StartRenderReq): Promise<Job>;
+  startCover(id: string, req: StartCoverReq): Promise<Job>;
+  coverSuggestions(id: string, startMs: number, endMs: number): Promise<CoverSuggestions>;
+  /** Small proxy frame for suggestion thumbnails. */
+  frameUrl(id: string, atMs: number): string;
   cancelJob(jobId: string): Promise<Job>;
 }
 

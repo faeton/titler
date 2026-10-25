@@ -42,5 +42,8 @@ export const httpApi: Api = {
   startAsr: (id, body) => req("POST", `/projects/${enc(id)}/asr`, body),
   startCompare: (id, body) => req("POST", `/projects/${enc(id)}/compare`, body),
   startRender: (id, body) => req("POST", `/projects/${enc(id)}/render`, body),
+  startCover: (id, body) => req("POST", `/projects/${enc(id)}/cover`, body),
+  coverSuggestions: (id, startMs, endMs) => req("GET", `/projects/${enc(id)}/cover/suggestions?startMs=${Math.round(startMs)}&endMs=${Math.round(endMs)}`),
+  frameUrl: (id, atMs) => `/api/projects/${enc(id)}/frame/${Math.round(atMs / 10) * 10}.jpg`,
   cancelJob: (jobId) => req("POST", `/jobs/${enc(jobId)}/cancel`, {}),
 };

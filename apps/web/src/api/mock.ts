@@ -280,6 +280,31 @@ const finish = (p: MockProject, j: MockProject["jobs"][number]) => {
       if (applied) pushRev(p, doc, "align");
       break;
     }
+    case "cover": {
+      const format = j.params.format === "youtube" ? "youtube" : "vertical";
+      const part = j.params.part as { index: number; total: number } | undefined;
+      const [w, h] = format === "youtube" ? [1280, 720] : [1080, 1920];
+      p.artifacts.push({
+        key: newId(),
+        projectId: id,
+        kind: "cover",
+        path: `covers/${format}.jpg`,
+        meta: {
+          output: "cover",
+          format,
+          atMs: j.params.atMs,
+          part: part ?? null,
+          title: p.project.settings.cover.title,
+          width: w,
+          height: h,
+          bytes: 412_000,
+          url: placeholder(`обложка ${part ? `${part.index + 1}/${part.total}` : ""}`, w / 6, h / 6),
+          fileName: `cover-${format}.jpg`,
+        },
+        createdAt: now(),
+      });
+      break;
+    }
     case "render": {
       const outputs = j.params.outputs as string[];
       const rev = latest(p);
@@ -316,6 +341,11 @@ const finish = (p: MockProject, j: MockProject["jobs"][number]) => {
     }
   }
 };
+
+const placeholder = (label: string, w: number, h: number) =>
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="#3a3f47"/><text x="50%" y="50%" fill="#fff" font-family="sans-serif" font-size="${Math.round(w / 6)}" text-anchor="middle">${label}</text></svg>`,
+  )}`;
 
 /** Advance simulated jobs: one at a time per project, FIFO. */
 const tick = () => {
@@ -515,6 +545,16 @@ export const mockApi: Api = {
       p.jobs.push(j);
       return j;
     }),
+  startCover: (id, req) =>
+    respond(() => {
+      const p = get(id);
+      const j = job(id, "cover", 1200, { ...req, format: req.format ?? "vertical" });
+      p.jobs.push(j);
+      return j;
+    }),
+  coverSuggestions: (_id, startMs, endMs) =>
+    respond(() => ({ suggestions: [0.1, 0.3, 0.5, 0.7, 0.9].map((f) => Math.round(startMs + f * (endMs - startMs))), fps: 4 })),
+  frameUrl: (_id, atMs) => placeholder(`${(atMs / 1000).toFixed(1)} с`, 180, 320),
   cancelJob: (jobId) =>
     respond(() => {
       for (const p of Object.values(db.projects)) {

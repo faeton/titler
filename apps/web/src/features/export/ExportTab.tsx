@@ -4,6 +4,7 @@ import { api, groupOutputs, isActive, latestJob, renderOutputs, type OutputKind,
 import { fmtBytes, fmtDate } from "../../lib/format";
 import { useProjectCtx } from "../project/useProject";
 import type { SeriesPlanView } from "./series";
+import { CoverPanel } from "./CoverPanel";
 import { SeriesPanel } from "./SeriesPanel";
 
 const OUTPUTS: [OutputKind, string][] = [
@@ -137,6 +138,8 @@ export const ExportTab = ({ plan }: { plan: SeriesPlanView | null }) => {
         {job?.status === "error" ? <div className="banner err">Экспорт не удался: {job.error}</div> : null}
         {err ? <div className="banner err">{err}</div> : null}
       </div>
+
+      {view?.project.probe ? <CoverPanel plan={plan} /> : null}
 
       <div className="section">
         <h2>Готовые файлы</h2>

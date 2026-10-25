@@ -993,3 +993,115 @@ input[type="range"] {
   font-size: 14px;
   font-weight: 620;
 }
+
+/* ---- covers (export) ----------------------------------------------------------- */
+
+.cover-edit {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.cover-side {
+  flex: 1;
+  min-width: 160px;
+  display: grid;
+  gap: 8px;
+}
+.cover-prev {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--stage);
+  flex: none;
+}
+.cover-prev canvas {
+  display: block;
+}
+.cover-title {
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  transform: translateY(-50%);
+  display: grid;
+  justify-items: center;
+  font-family: "Montserrat", var(--font);
+  font-weight: 700;
+  line-height: 1.22;
+  color: #fff;
+  -webkit-text-stroke-color: #000;
+  paint-order: stroke fill;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.guide {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+.guide.grid {
+  border-top: 1.5px dashed rgb(255 255 255 / 85%);
+  border-bottom: 1.5px dashed rgb(255 255 255 / 85%);
+  box-shadow: 0 0 0 999px rgb(0 0 0 / 28%);
+}
+.guide.wide {
+  border-top: 1.5px dotted rgb(255 225 77 / 85%);
+  border-bottom: 1.5px dotted rgb(255 225 77 / 85%);
+}
+input.text {
+  min-height: var(--tap);
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  width: 100%;
+}
+.frames {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.frames > button {
+  flex: none;
+  display: grid;
+  gap: 2px;
+  padding: 3px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.frames > button[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.frames img {
+  display: block;
+  height: 96px;
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+.covers {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cover-out {
+  display: grid;
+  gap: 2px;
+  width: 84px;
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.cover-out.wide {
+  width: 168px;
+}
+.cover-out img {
+  width: 100%;
+  border-radius: 7px;
+  background: var(--surface-2);
+}

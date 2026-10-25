@@ -3,7 +3,8 @@
 // Uploads the clip (chunked), waits for ingest + ASR, edits a word (then undoes
 // it), checks audio/frame/export on the first project that has a transcript —
 // including the series panel (custom 10 s parts: timeline, «1/N» preview badge,
-// dragging a cut, «Авто») — restores that project's series settings and
+// dragging a cut, «Авто») and a cover for part 2 (suggested frames, preview,
+// JPEG with title + badge) — restores that project's series/cover settings and
 // deletes the uploaded project at the end.
 import { chromium } from "playwright-core";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -20,6 +21,7 @@ const apiGet = (p) => fetch(`${base}/api${p}`).then((r) => r.json());
 const browser = await chromium.connect(process.env.PW_WS ?? "ws://127.0.0.1:30150/");
 let uploaded = null;
 let restoreSeries = null;
+let restoreCover = null;
 try {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 800 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const page = await ctx.newPage();
@@ -93,6 +95,7 @@ try {
   // ---- series ----
   const before = await apiGet(`/projects/${pid}`);
   restoreSeries = { pid, series: before.project.settings.series };
+  restoreCover = before.project.settings.cover;
   const D = before.project.probe.durationMs;
   await page.locator(".dests button", { hasText: "Своя" }).tap();
   await page.locator(".field input[type=range]").fill("10");
@@ -130,10 +133,34 @@ try {
   check(!(await apiGet(`/projects/${pid}`)).project.settings.series.cuts.custom, "series: «Авто» drops the hand cuts");
   await page.screenshot({ path: `${out}/8-series-auto.png` });
 
+  // ---- cover (custom 10 s series still on: covers are per part) ----
+  const coversBefore = (await apiGet(`/projects/${pid}`)).artifacts.filter((a) => a.kind === "cover").length;
+  await page.getByRole("group", { name: "Часть", exact: true }).getByRole("button", { name: "Часть 2", exact: true }).tap();
+  await page.locator(".frames img").first().waitFor({ timeout: 20000 });
+  await page.waitForFunction(() => [...document.querySelectorAll(".frames img")].every((i) => i.complete && i.naturalWidth > 0), null, { timeout: 20000 }).catch(() => {});
+  const thumbs = await page.locator(".frames img").evaluateAll((is) => is.map((i) => i.naturalWidth));
+  check(thumbs.length >= 2 && thumbs.every((w) => w > 0), `cover: ${thumbs.length} suggested frames loaded`);
+  await page.locator(".frames button").nth(1).tap();
+  await page.waitForTimeout(600);
+  const painted = await page.locator(".cover-prev canvas").evaluate((c) => {
+    const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    let s = 0;
+    for (let i = 0; i < d.length; i += 400) s += d[i] + d[i + 1] + d[i + 2];
+    return s > 0;
+  });
+  check(painted, "cover: preview canvas shows the frame");
+  check((await page.locator(".cover-prev .badge").textContent()) === `2/${parts}`, "cover: preview badge for part 2");
+  await page.locator(".cover-side input.text").fill("Проверка обложки");
+  await page.getByRole("button", { name: /Сделать обложку части 2/ }).tap();
+  await page.waitForFunction((n) => document.querySelectorAll(".cover-out img").length > n, Math.min(coversBefore, 12), { timeout: 60000 }).catch(() => {});
+  const cv = (await apiGet(`/projects/${pid}`)).artifacts.filter((a) => a.kind === "cover").sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  check(cv && cv.meta.badge === `2/${parts}` && cv.meta.title === "Проверка обложки" && cv.meta.width === 1080, `cover: JPEG made (${cv?.meta.badge}, ${cv?.meta.bytes} bytes)`);
+  await page.screenshot({ path: `${out}/9-cover.png` });
+
   check(errors.length === 0, `no page errors ${errors.join(" | ")}`);
 } finally {
   if (restoreSeries) {
-    await fetch(`${base}/api/projects/${restoreSeries.pid}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings: { series: restoreSeries.series } }) });
+    await fetch(`${base}/api/projects/${restoreSeries.pid}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings: { series: restoreSeries.series, ...(restoreCover ? { cover: restoreCover } : {}) } }) });
   }
   if (uploaded) await fetch(`${base}/api/projects/${uploaded}`, { method: "DELETE" }).then((r) => console.log("cleanup delete", r.status));
   await browser.close();
