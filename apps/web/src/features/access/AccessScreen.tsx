@@ -1,4 +1,4 @@
-import type { AuthKey, AuthMe } from "@titler/core";
+import type { AuthKey, AuthMe, LinkStats } from "@titler/core";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api";
 import { fmtDate } from "../../lib/format";
@@ -56,12 +56,16 @@ export const AccessScreen = () => {
   const [keys, setKeys] = useState<AuthKey[] | null>(null);
   const [name, setName] = useState("");
   const [fresh, setFresh] = useState<{ name: string; secret: string } | null>(null);
+  const [links, setLinks] = useState<LinkStats | null>(null);
+  const [confirmRotate, setConfirmRotate] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
       const m = await api.authMe();
       setMe(m);
-      setKeys(m.via === "key" ? null : await api.listKeys());
+      const owner = m.via !== "key";
+      setKeys(owner ? await api.listKeys() : null);
+      setLinks(owner ? await api.linkStats() : null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -86,6 +90,17 @@ export const AccessScreen = () => {
     await api.revokeKey(id).catch((e: Error) => setErr(e.message));
     await load();
   };
+
+  const rotate = async () => {
+    setErr(null);
+    try {
+      setLinks(await api.rotateLinks());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+    setConfirmRotate(false);
+  };
+  const linksLive = !!links?.lastExpiresAt && new Date(links.lastExpiresAt).getTime() > Date.now();
 
   return (
     <>
@@ -165,6 +180,38 @@ export const AccessScreen = () => {
               ))}
               {!keys.length ? <p className="hint">Ключей пока нет.</p> : null}
             </div>
+          </div>
+        ) : null}
+        {links ? (
+          <div className="section">
+            <h2>Ссылки на файлы</h2>
+            <p className="hint">
+              Подписанные ссылки для сервисов, которые забирают видео по адресу. Каждая работает до своего срока; сброс отключает все сразу.
+            </p>
+            <p className="hint">
+              {links.rotatedAt ? `С последнего сброса (${fmtDate(links.rotatedAt)})` : "Всего"} выдано: {links.issued}
+              {links.issued ? (linksLive ? ` · последняя действует до ${fmtDate(links.lastExpiresAt!)}` : " · все уже истекли") : ""}
+            </p>
+            {confirmRotate ? (
+              <div className="card confirm">
+                <b>Отключить все выданные ссылки?</b>
+                <span className="hint">Они перестанут открываться сразу, в том числе у сервисов, которые ещё не забрали файл. Новые ссылки можно будет выдать как обычно.</span>
+                <div className="row">
+                  <button className="btn danger" onClick={() => void rotate()}>
+                    Отключить все
+                  </button>
+                  <button className="btn ghost" onClick={() => setConfirmRotate(false)}>
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="row">
+                <button className="btn danger" onClick={() => setConfirmRotate(true)}>
+                  Отключить все ссылки
+                </button>
+              </div>
+            )}
           </div>
         ) : null}
         {err ? <div className="banner err">{err}</div> : null}

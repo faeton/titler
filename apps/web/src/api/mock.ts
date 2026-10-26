@@ -26,6 +26,7 @@ import {
   toVtt,
   type AlignWindow,
   type AuthKey,
+  type LinkStats,
   type Artifact,
   type CompareClip,
   type Job,
@@ -344,6 +345,7 @@ const finish = (p: MockProject, j: MockProject["jobs"][number]) => {
 };
 
 const mockKeys: AuthKey[] = [];
+const mockLinks: LinkStats = { issued: 3, rotatedAt: null, lastExpiresAt: new Date(Date.now() + 3_600_000).toISOString() };
 
 const placeholder = (label: string, w: number, h: number) =>
   `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
@@ -575,6 +577,8 @@ export const mockApi: Api = {
       k.revokedAt = now();
       return k;
     }),
+  linkStats: () => respond(() => ({ ...mockLinks })),
+  rotateLinks: () => respond(() => Object.assign(mockLinks, { issued: 0, rotatedAt: now(), lastExpiresAt: null })),
   cancelJob: (jobId) =>
     respond(() => {
       for (const p of Object.values(db.projects)) {

@@ -4,6 +4,7 @@ import type {
   CoverSuggestions,
   CreateUploadReq,
   Job,
+  LinkStats,
   PatchProjectReq,
   ProjectSummary,
   ProjectView,
@@ -51,6 +52,8 @@ export interface Api {
   listKeys(): Promise<AuthKey[]>;
   createKey(name: string): Promise<AuthKey & { secret: string }>;
   revokeKey(id: string): Promise<AuthKey>;
+  linkStats(): Promise<LinkStats>;
+  rotateLinks(): Promise<LinkStats>;
 }
 
 /** Fired on window when the server answers 401 "login required". */

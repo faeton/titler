@@ -58,4 +58,6 @@ export const httpApi: Api = {
   listKeys: () => req("GET", "/auth/keys"),
   createKey: (name) => req("POST", "/auth/keys", { name }),
   revokeKey: (id) => req("DELETE", `/auth/keys/${enc(id)}`),
+  linkStats: () => req("GET", "/auth/links"),
+  rotateLinks: () => req("POST", "/auth/links/rotate", {}),
 };

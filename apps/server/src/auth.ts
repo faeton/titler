@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import type { Db } from "./db.js";
+import { tx, type Db } from "./db.js";
 import { newId, now } from "./store.js";
 
 // Access control for the public gateway (PLAN-v3 §2, step A).
@@ -13,7 +13,8 @@ import { newId, now } from "./store.js";
 //   - owner token  → POST /api/auth/login → session cookie (HttpOnly; Secure over HTTPS)
 //   - device keys  → Authorization: Bearer tk_…  (named, hashed, revocable)
 //   - signed links → /s/<token> for one artifact file until it expires
-//                    (Instagram / AudioShake / Modal fetch media by URL)
+//                    (Instagram / AudioShake / Modal fetch media by URL);
+//                    rotating the signing secret invalidates all of them at once
 
 export type AuthMode = "gateway" | "all" | "off";
 
@@ -32,6 +33,15 @@ export interface KeyRow {
   createdAt: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
+}
+
+/** Signed links issued with the current signing secret (no per-link rows: counters in settings_kv). */
+export interface LinkStats {
+  issued: number;
+  /** When the secret was last rotated; null = never (the secret from first start). */
+  rotatedAt: string | null;
+  /** Latest expiry among those links; null = none issued. Past it, nothing signed is still valid. */
+  lastExpiresAt: string | null;
 }
 
 export const hashSecret = (s: string): string => createHash("sha256").update(s).digest("hex");
@@ -61,12 +71,21 @@ export class Auth {
     private db: Db,
     readonly cfg: AuthConfig,
   ) {
-    const row = db.prepare("SELECT v FROM settings_kv WHERE k = 'signing_secret'").get() as Row | undefined;
-    if (row) this.signingKey = Buffer.from(row.v as string, "hex");
+    const v = this.kv("signing_secret");
+    if (v) this.signingKey = Buffer.from(v, "hex");
     else {
       this.signingKey = randomBytes(32);
-      db.prepare("INSERT INTO settings_kv (k, v) VALUES ('signing_secret', ?)").run(this.signingKey.toString("hex"));
+      this.setKv("signing_secret", this.signingKey.toString("hex"));
     }
+  }
+
+  private kv(k: string): string | null {
+    const r = this.db.prepare("SELECT v FROM settings_kv WHERE k = ?").get(k) as Row | undefined;
+    return r ? (r.v as string) : null;
+  }
+
+  private setKv(k: string, v: string): void {
+    this.db.prepare("INSERT INTO settings_kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(k, v);
   }
 
   // ---- keys ----
@@ -127,7 +146,27 @@ export class Auth {
     const exp = Math.floor(Date.now() / 1000) + ttlSec;
     const payload = b64url(JSON.stringify({ k: artifactKey, f: file, e: exp }));
     const mac = createHmac("sha256", this.signingKey).update(payload).digest("base64url");
-    return { token: `${payload}.${mac}`, expiresAt: new Date(exp * 1000).toISOString() };
+    const expiresAt = new Date(exp * 1000).toISOString();
+    this.setKv("signing_issued", String(Number(this.kv("signing_issued") ?? 0) + 1));
+    const last = this.kv("signing_last_exp");
+    if (!last || last < expiresAt) this.setKv("signing_last_exp", expiresAt);
+    return { token: `${payload}.${mac}`, expiresAt };
+  }
+
+  linkStats(): LinkStats {
+    return { issued: Number(this.kv("signing_issued") ?? 0), rotatedAt: this.kv("signing_rotated_at"), lastExpiresAt: this.kv("signing_last_exp") };
+  }
+
+  /** New signing secret: every link signed so far stops working (403). */
+  rotateSigningKey(): LinkStats {
+    this.signingKey = randomBytes(32);
+    tx(this.db, () => {
+      this.setKv("signing_secret", this.signingKey.toString("hex"));
+      this.setKv("signing_rotated_at", now());
+      this.setKv("signing_issued", "0");
+      this.db.prepare("DELETE FROM settings_kv WHERE k = 'signing_last_exp'").run();
+    });
+    return this.linkStats();
   }
 
   /** "bad" = forged / malformed, "expired" = valid but past its time. */

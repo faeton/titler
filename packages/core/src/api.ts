@@ -209,6 +209,8 @@ export interface ProviderInfo {
 // POST   /api/auth/keys               { name } → AuthKey & { secret }  (secret shown once)
 // DELETE /api/auth/keys/:id           → AuthKey (revoked)
 // POST   /api/artifacts/:key/sign     { file?, ttlSec? (60..604800, default 3600) } → SignedLink
+// GET    /api/auth/links              → LinkStats          (local / owner session only)
+// POST   /api/auth/links/rotate       → LinkStats  (new signing secret: every signed link stops working)
 // GET    /s/<token>[/<name>]          the signed file, no credentials (Range supported)
 
 export interface AuthMe {
@@ -231,4 +233,12 @@ export interface AuthKey {
 export interface SignedLink {
   url: string;
   expiresAt: string;
+}
+
+/** Signed links issued since the signing secret was last rotated (counters only, no per-link rows). */
+export interface LinkStats {
+  issued: number;
+  rotatedAt: string | null;
+  /** Latest expiry among them; once past, no signed link is valid anyway. */
+  lastExpiresAt: string | null;
 }

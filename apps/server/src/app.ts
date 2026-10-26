@@ -274,6 +274,17 @@ export const buildApp = async (opts: BuildOpts = {}): Promise<App> => {
     return auth.getKey(req.params.id);
   });
 
+  // Signed links: how many since the last rotation, and "invalidate all" (rotates the secret).
+  fastify.get("/api/auth/links", async (req) => {
+    requireOwner(req);
+    return auth.linkStats();
+  });
+  fastify.post("/api/auth/links/rotate", async (req) => {
+    requireOwner(req);
+    log.info("signing secret rotated: all signed links invalidated");
+    return auth.rotateSigningKey();
+  });
+
   // Raw upload chunks are streamed straight to disk, never buffered.
   fastify.addContentTypeParser("application/octet-stream", (_req, payload, done) => done(null, payload));
 

@@ -121,6 +121,39 @@ describe("access control", () => {
     expect((await call(app, "GET", `/s/${old}`, { headers: GW })).status).toBe(410);
   });
 
+  it("rotating the signing secret invalidates every signed link; owner only", async () => {
+    const app = await start();
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const p = app.ctx.store.createProject({ name: "x", sourceSha256: "s", sourceName: "x.mov", sourcePath: "sources/x.mov" });
+    mkdirSync(join(app.ctx.cfg.dataDir, "artifacts/k1"), { recursive: true });
+    writeFileSync(join(app.ctx.cfg.dataDir, "artifacts/k1/v.mp4"), Buffer.from("0123456789"));
+    app.ctx.store.putArtifact({ key: "k1", projectId: p.id, kind: "render", path: "artifacts/k1/v.mp4", meta: {} });
+
+    expect((await call(app, "GET", "/api/auth/links")).json).toEqual({ issued: 0, rotatedAt: null, lastExpiresAt: null });
+    const a = (await call(app, "POST", "/api/artifacts/k1/sign", { body: { ttlSec: 600 } })).json!;
+    const b = (await call(app, "POST", "/api/artifacts/k1/sign", { body: { ttlSec: 7200 } })).json!;
+    expect((await call(app, "GET", "/api/auth/links")).json).toEqual({ issued: 2, rotatedAt: null, lastExpiresAt: b.expiresAt });
+    expect((await call(app, "GET", a.url, { headers: GW })).status).toBe(200);
+
+    // Through the gateway only an owner session may rotate; a device key may not.
+    const { secret: dev } = app.ctx.auth.createKey("device", "script");
+    expect((await call(app, "POST", "/api/auth/links/rotate", { headers: GW })).status).toBe(401);
+    expect((await call(app, "POST", "/api/auth/links/rotate", { headers: { ...GW, authorization: `Bearer ${dev}` } })).status).toBe(403);
+    const { secret: owner } = app.ctx.auth.createKey("owner", "me");
+    const cookie = String((await call(app, "POST", "/api/auth/login", { headers: GW, body: { token: owner } })).res.headers["set-cookie"]).split(";")[0]!;
+    const r = await call(app, "POST", "/api/auth/links/rotate", { headers: { ...GW, cookie } });
+    expect(r.json).toEqual({ issued: 0, rotatedAt: expect.any(String), lastExpiresAt: null });
+    for (const u of [a.url, b.url]) expect((await call(app, "GET", u, { headers: GW })).status).toBe(403);
+    // New links work, and the secret survives a restart (same DB).
+    const c = (await call(app, "POST", "/api/artifacts/k1/sign", { body: {} })).json!;
+    expect((await call(app, "GET", c.url, { headers: GW })).status).toBe(200);
+    const { Auth } = await import("../src/auth.js");
+    const again = new Auth((app.ctx.auth as unknown as { db: never }).db, app.ctx.auth.cfg);
+    expect(again.verify(c.url.split("/")[2]!)).toEqual({ key: "k1", file: "v.mp4" });
+    expect(again.linkStats().issued).toBe(1);
+  });
+
   it("CORS for listed origins only; login is rate limited per client", async () => {
     const app = await start();
     const pre = await call(app, "OPTIONS", "/api/projects", { headers: { origin: "https://app.example", "access-control-request-method": "GET" } });
