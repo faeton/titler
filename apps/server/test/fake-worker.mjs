@@ -74,8 +74,13 @@ const ops = {
   },
 };
 
-// stands in for faulthandler.register(SIGUSR1) in the Python worker
-process.on("SIGUSR1", () => process.stderr.write(`Current thread 0x1 (most recent call first):\n  File "fake.py", line 7 in ${role}_load\n`));
+// stands in for faulthandler.register(SIGUSR1) in the Python worker (other threads first, like faulthandler)
+process.on("SIGUSR1", () =>
+  process.stderr.write(
+    `Thread 0x2 (most recent call first):\n  File "threading.py", line 331 in wait\n\n` +
+      `Current thread 0x1 (most recent call first):\n  File "fake.py", line 7 in ${role}_load\n`,
+  ),
+);
 
 if (process.env.FAKE_HANG_START) await sleep(60_000);
 send({ ready: true, role, pid: process.pid });

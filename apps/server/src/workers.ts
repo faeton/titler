@@ -114,7 +114,9 @@ export class Worker {
       return await this.attempt(op, params, opts);
     } catch (e) {
       if (!(e instanceof WorkerHangError)) throw e;
-      const at = /^\s*File .*$/m.exec(e.dump)?.[0].trim();
+      // faulthandler runs in the main thread ("Current thread"): its innermost frame is where the load is stuck.
+      const main = e.dump.slice(Math.max(0, e.dump.indexOf("Current thread")));
+      const at = /^\s*File .*$/m.exec(main)?.[0].trim();
       throw new WorkerError(
         `${this.spec.role} worker hung twice while ${PHASE_TEXT[e.phase]} (op ${op}); stack dumps are in the server log` +
           (at ? `; innermost frame: ${at}` : ""),
