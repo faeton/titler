@@ -251,6 +251,23 @@ describe("worker manager", () => {
     w.kill();
   });
 
+  it("kill reaches the worker's children even when the worker exits on SIGTERM first", async () => {
+    const w = new Worker(spec());
+    const { pid } = (await w.request("child")) as { pid: number };
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    expect(alive()).toBe(true);
+    w.kill();
+    await new Promise((r) => setTimeout(r, 3500));
+    expect(alive()).toBe(false);
+  });
+
   it("watchdog: a worker that never becomes ready is dumped, retried once, then fails", async () => {
     const { lines, log } = logged();
     const w = new Worker({ ...spec({ FAKE_HANG_START: "1" }), startTimeoutMs: 300, dumpWaitMs: 500, log });

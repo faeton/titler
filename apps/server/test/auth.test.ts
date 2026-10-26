@@ -218,9 +218,9 @@ const softAuthenticator = (rpId: string, origin: string) => {
         response: { clientDataJSON: clientData("webauthn.create", challenge).toString("base64url"), attestationObject: att.toString("base64url"), transports: ["internal"] },
       };
     },
-    get: (challenge: string, o?: string) => {
+    get: (challenge: string, o?: string, n?: number) => {
       const cnt = Buffer.alloc(4);
-      cnt.writeUInt32BE(++counter);
+      cnt.writeUInt32BE(n ?? ++counter);
       const authData = Buffer.concat([rpHash, Buffer.from([0x05]), cnt]); // UP | UV
       const cd = clientData("webauthn.get", challenge, o);
       const signature = sign("sha256", Buffer.concat([authData, sha(cd)]), privateKey); // DER, as authenticators send it
@@ -291,6 +291,16 @@ describe("passkeys", () => {
     const other = softAuthenticator("titler.example", ORIGIN);
     const lo3 = (await call(app, "POST", "/api/auth/passkey/login/options", { headers: GWP, body: {} })).json!;
     expect((await call(app, "POST", "/api/auth/passkey/login/verify", { headers: GWP, body: { response: other.get(lo3.challenge) } })).json).toMatchObject({ error: "unknown passkey" });
+
+    // Two logins verified concurrently never move the counter backwards: afterwards an
+    // assertion that reuses the higher counter is refused (it would pass if 1 had won the write).
+    const GWC = { ...GW, "x-forwarded-for": "198.51.100.10" }; // fresh login rate-limit budget
+    const [la, lb, lc] = await Promise.all([0, 1, 2].map(async () => (await call(app, "POST", "/api/auth/passkey/login/options", { headers: GWC, body: {} })).json!));
+    await Promise.all([
+      call(app, "POST", "/api/auth/passkey/login/verify", { headers: GWC, body: { response: authr.get(la!.challenge, undefined, 11) } }),
+      call(app, "POST", "/api/auth/passkey/login/verify", { headers: GWC, body: { response: authr.get(lb!.challenge, undefined, 10) } }),
+    ]);
+    expect((await call(app, "POST", "/api/auth/passkey/login/verify", { headers: GWC, body: { response: authr.get(lc!.challenge, undefined, 11) } })).status).toBe(401);
 
     // Revoking its key row (same list as device keys) ends its sessions and disables it.
     expect((await call(app, "DELETE", `/api/auth/keys/${reg.json!.id}`, { headers: S })).status).toBe(200);

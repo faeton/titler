@@ -31,7 +31,8 @@ const signalGroup = (proc: ChildProcessWithoutNullStreams, sig: NodeJS.Signals):
     if (proc.pid && process.platform !== "win32") process.kill(-proc.pid, sig);
     else proc.kill(sig);
   } catch {
-    proc.kill(sig);
+    // ESRCH: the whole group is gone. Otherwise fall back to the worker itself (no-op if it exited).
+    if (proc.exitCode === null && proc.signalCode === null) proc.kill(sig);
   }
 };
 
@@ -355,9 +356,9 @@ export class Worker {
     this.pending = null;
     p?.reject(new WorkerError(`${this.spec.role} worker killed: ${reason}`));
     signalGroup(proc, "SIGTERM");
-    setTimeout(() => {
-      if (proc.exitCode === null && proc.signalCode === null) signalGroup(proc, "SIGKILL");
-    }, 3000).unref();
+    // Always escalate for the group: the worker may have exited on SIGTERM while a child
+    // (ffmpeg, deep-filter) ignored it. A group that's already gone is a no-op.
+    setTimeout(() => signalGroup(proc, "SIGKILL"), 3000).unref();
   }
 }
 

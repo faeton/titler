@@ -3,6 +3,7 @@
 // Env: FAKE_ALIGN_DELAY_MS (delay per align_window), FAKE_ASR_DELAY_MS,
 // FAKE_HANG_START (never print ready), FAKE_HANG_ONCE (marker file: `load` hangs only
 // while it doesn't exist, then creates it).
+import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
@@ -15,6 +16,13 @@ const ops = {
   ping: async () => ({ role, models: [] }),
   sleep: async (m) => (await sleep(m.ms ?? 1000), { slept: m.ms }),
   crash: async () => process.exit(3),
+  // a child that ignores SIGTERM (like a busy ffmpeg); the worker itself exits on SIGTERM
+  child: async () => {
+    const c = spawn(process.execPath, ["-e", "process.on('SIGTERM',()=>{});console.log('up');setInterval(()=>{},1000)"], { stdio: ["ignore", "pipe", "ignore"] });
+    await new Promise((r) => c.stdout.once("data", r)); // its SIGTERM handler is in place
+    process.on("SIGTERM", () => process.exit(0));
+    return { pid: c.pid };
+  },
   // "loading model" progress, then silence: what a stuck model load looks like
   load: async (m, id) => {
     send({ id, progress: 0, message: "loading model" });

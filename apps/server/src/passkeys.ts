@@ -177,9 +177,18 @@ export class Passkeys {
       throw new PasskeyError(401, `passkey not accepted: ${e instanceof Error ? e.message : String(e)}`);
     }
     if (!v.verified) throw new PasskeyError(401, "passkey not accepted");
-    this.db.prepare("UPDATE passkeys SET counter = ? WHERE cred_id = ?").run(v.authenticationInfo.newCounter, row.cred_id as string);
-    this.db.prepare("UPDATE auth_keys SET last_used_at = ? WHERE id = ?").run(now(), row.key_id as string);
-    return this.auth.startSession(this.auth.getKey(row.key_id as string)!);
+    const next = v.authenticationInfo.newCounter;
+    // Re-read the counter after the (async) verification: two logins verified concurrently must
+    // not move it backwards, and the slower one with an older counter is a replay or a clone.
+    // Authenticators that always send 0 (most synced passkeys) don't use counters at all.
+    return tx(this.db, () => {
+      const cur = this.db.prepare("SELECT counter FROM passkeys WHERE cred_id = ?").get(row.cred_id as string) as { counter: number } | undefined;
+      if (!cur) throw new PasskeyError(401, "unknown passkey");
+      if (next > 0 && next <= Number(cur.counter)) throw new PasskeyError(401, "passkey not accepted: signature counter went backwards");
+      if (next > 0) this.db.prepare("UPDATE passkeys SET counter = ? WHERE cred_id = ?").run(next, row.cred_id as string);
+      this.db.prepare("UPDATE auth_keys SET last_used_at = ? WHERE id = ?").run(now(), row.key_id as string);
+      return this.auth.startSession(this.auth.getKey(row.key_id as string)!);
+    });
   }
 }
 
