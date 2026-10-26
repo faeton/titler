@@ -35,6 +35,21 @@ On start the worker prints `{"ready": true, "role": "...", "pid": n}`. Every rol
 
 All times are **integer milliseconds**. All audio paths are absolute.
 
+## Hang watchdog
+
+Every worker registers `faulthandler` on `SIGUSR1` at startup: `kill -USR1 <pid>` dumps
+all threads' stacks to stderr. A progress line whose message starts with `loading` marks
+a model load (asr sends `loading model` … `model loaded`; while a model download is
+visibly growing it repeats `loading model (downloading, N MB)` every 20 s).
+
+The server treats silence as a hang: no line for `TITLER_WORKER_LOAD_SILENCE_MS`
+(default 120000) before `ready` or during a load, or for `TITLER_WORKER_SILENCE_MS`
+(default 0 = off) in any other phase of a request. It sends `SIGUSR1`, logs the dump
+("worker hang: stack dump"), kills the worker and retries the request once on a fresh
+process; a second hang fails the request ("<role> worker hung twice while …", with the
+innermost frame). `workers/smoke.py` sends `SIGUSR1` when a request is silent for
+`TITLER_SMOKE_TIMEOUT` s (default 900) and the dump lands in `<role>.stderr.log`.
+
 ## Ops
 
 ### role `analyze`
