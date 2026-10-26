@@ -189,7 +189,7 @@ export const buildApp = async (opts: BuildOpts = {}): Promise<App> => {
   const log = fastify.log;
   const workers = new WorkerManager(
     Object.fromEntries(
-      Object.entries(cfg.workers).map(([role, command]) => [role, { command, cwd: cfg.repoRoot, env: cfg.workerEnv, log }]),
+      Object.entries(cfg.workers).map(([role, command]) => [role, { command, cwd: cfg.repoRoot, env: cfg.workerEnv, log, ...cfg.workerWatchdog }]),
     ),
     cfg.workerTimeoutMs,
   );

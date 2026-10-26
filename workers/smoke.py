@@ -6,6 +6,7 @@
 Stdlib only (numpy/soundfile, if importable, enable extra enhance checks). Commands come
 from TITLER_WORKER_<ROLE> (JSON array) or the defaults in docs/worker-protocol.md.
 Outputs go to $TITLER_SMOKE_OUT (default /mnt/flash/scratch/titler/smoke on n5, ~/.cache/titler/smoke elsewhere).
+A request silent for $TITLER_SMOKE_TIMEOUT s (default 900) gets SIGUSR1 (stack dump in <role>.stderr.log).
 Exit code 0 only if every check passed.
 """
 from __future__ import annotations
@@ -14,6 +15,7 @@ import argparse
 import json
 import os
 import select
+import signal
 import subprocess
 import sys
 import time
@@ -59,13 +61,18 @@ class Worker:
     def _read(self, timeout):
         r, _, _ = select.select([self.p.stdout], [], [], timeout)
         if not r:
-            raise TimeoutError(f"{self.role}: no output in {timeout}s")
+            # the worker registers faulthandler on SIGUSR1: get its stack into the stderr log
+            if hasattr(signal, "SIGUSR1") and self.p.poll() is None:
+                self.p.send_signal(signal.SIGUSR1)
+                time.sleep(1)
+            raise TimeoutError(f"{self.role}: no output in {timeout}s (stack dump in {self.err.name})")
         line = self.p.stdout.readline()
         if not line:
             raise RuntimeError(f"{self.role}: worker exited (rc={self.p.poll()}), see stderr log")
         return json.loads(line)
 
-    def call(self, op, timeout=900, **params):
+    def call(self, op, timeout=None, **params):
+        timeout = timeout or float(os.environ.get("TITLER_SMOKE_TIMEOUT", 900))
         self.next_id += 1
         rid = self.next_id
         self.p.stdin.write(json.dumps({"id": rid, "op": op, **params}, ensure_ascii=False) + "\n")

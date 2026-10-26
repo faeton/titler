@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Minimal stand-in for workers/titler_worker that speaks docs/worker-protocol.md.
-// Env: FAKE_ALIGN_DELAY_MS (delay per align_window), FAKE_ASR_DELAY_MS.
-import { copyFileSync, writeFileSync } from "node:fs";
+// Env: FAKE_ALIGN_DELAY_MS (delay per align_window), FAKE_ASR_DELAY_MS,
+// FAKE_HANG_START (never print ready), FAKE_HANG_ONCE (marker file: `load` hangs only
+// while it doesn't exist, then creates it).
+import { copyFileSync, existsSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 const role = process.argv[process.argv.indexOf("--role") + 1] ?? "unknown";
@@ -13,6 +15,15 @@ const ops = {
   ping: async () => ({ role, models: [] }),
   sleep: async (m) => (await sleep(m.ms ?? 1000), { slept: m.ms }),
   crash: async () => process.exit(3),
+  // "loading model" progress, then silence: what a stuck model load looks like
+  load: async (m, id) => {
+    send({ id, progress: 0, message: "loading model" });
+    const once = process.env.FAKE_HANG_ONCE;
+    if (once && existsSync(once)) return { loaded: true };
+    if (once) writeFileSync(once, "");
+    await sleep(m.ms ?? 60_000);
+    return { loaded: true };
+  },
   echo: async (m, id) => {
     send({ id, progress: 0.5, message: "half" });
     return { echo: m.value };
@@ -63,6 +74,10 @@ const ops = {
   },
 };
 
+// stands in for faulthandler.register(SIGUSR1) in the Python worker
+process.on("SIGUSR1", () => process.stderr.write(`Current thread 0x1 (most recent call first):\n  File "fake.py", line 7 in ${role}_load\n`));
+
+if (process.env.FAKE_HANG_START) await sleep(60_000);
 send({ ready: true, role, pid: process.pid });
 const rl = createInterface({ input: process.stdin });
 let chain = Promise.resolve();

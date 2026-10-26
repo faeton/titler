@@ -34,6 +34,8 @@ export interface Config {
   workerEnv: Record<string, string>;
   /** Per-request worker timeout (ms) per role. */
   workerTimeoutMs: Record<WorkerRole, number>;
+  /** Hang watchdog (workers.ts): silence limit while starting / loading a model, and for the rest of a request (0 = off). */
+  workerWatchdog: { loadSilenceMs: number; silenceMs: number };
   concurrency: Record<string, number>;
   asrProvider: string;
   logLevel: string;
@@ -110,6 +112,10 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env, overrides: Part
       asr: Number(env.TITLER_TIMEOUT_ASR ?? 60 * 60_000),
       align: Number(env.TITLER_TIMEOUT_ALIGN ?? 10 * 60_000),
       enhance: Number(env.TITLER_TIMEOUT_ENHANCE ?? 60 * 60_000),
+    },
+    workerWatchdog: {
+      loadSilenceMs: Number(env.TITLER_WORKER_LOAD_SILENCE_MS ?? 120_000),
+      silenceMs: Number(env.TITLER_WORKER_SILENCE_MS ?? 0),
     },
     concurrency: { media: 2, asr: 1, align: 1, enhance: 1, analyze: 1 },
     asrProvider: env.TITLER_ASR_PROVIDER ?? "faster-whisper",

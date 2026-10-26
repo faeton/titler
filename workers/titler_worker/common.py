@@ -94,3 +94,60 @@ def wav_frames(path: str) -> int:
                 return size // block
             else:
                 f.seek(size + (size & 1), 1)
+
+
+# --- model downloads vs. the server's hang watchdog --------------------------------------
+def _hub_cache() -> str:
+    if os.environ.get("HF_HUB_CACHE"):
+        return os.environ["HF_HUB_CACHE"]
+    if os.environ.get("HF_HOME"):
+        return os.path.join(os.environ["HF_HOME"], "hub")
+    xdg = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    return os.path.join(xdg, "huggingface", "hub")
+
+
+def _partial_bytes(roots) -> int:
+    """Total size of in-flight HF downloads (`*.incomplete`) under the given dirs."""
+    n = 0
+    for root in roots:
+        for d, _, files in os.walk(root):
+            for f in files:
+                if f.endswith(".incomplete"):
+                    try:
+                        n += os.path.getsize(os.path.join(d, f))
+                    except OSError:
+                        pass
+    return n
+
+
+class download_heartbeat:
+    """While a model loads, re-send the "loading model" progress line every `every` s, but
+    only if a download is visibly growing. The server treats a silent load as a hang
+    (SIGUSR1 + restart), so a first-run download must not look silent, and a load that is
+    stuck (no bytes arriving) must stay silent.
+    """
+
+    def __init__(self, progress, roots=(), every: float = 20.0):
+        import threading
+        self.progress = progress
+        self.roots = [r for r in (_hub_cache(), *roots) if r]
+        self.every = every
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="download-heartbeat", daemon=True)
+
+    def _run(self):
+        last = _partial_bytes(self.roots)
+        while not self._stop.wait(self.every):
+            now = _partial_bytes(self.roots)
+            if now != last:
+                self.progress(0.0, f"loading model (downloading, {now >> 20} MB)")
+            last = now
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._thread.join(timeout=1)
+        return False

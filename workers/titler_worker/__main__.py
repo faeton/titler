@@ -5,7 +5,9 @@ Long-lived model worker speaking the JSON-lines protocol in docs/worker-protocol
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import importlib
+import signal
 import sys
 
 ROLES = ("analyze", "asr", "align", "enhance")
@@ -17,6 +19,12 @@ def main():
     ap.add_argument("--preload", action="store_true",
                     help="load the role's default models before printing ready")
     a = ap.parse_args()
+
+    # `kill -USR1 <pid>` dumps every thread's stack to stderr (the server's hang watchdog
+    # does this before restarting a silent worker). Registered before any model import so
+    # a hang inside native code (onnxruntime, torch) still gets a dump.
+    if hasattr(signal, "SIGUSR1"):
+        faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True)
 
     from . import common  # noqa: F401  (env defaults before any heavy import)
     from .protocol import Channel, log, serve
