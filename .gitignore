@@ -39,3 +39,7 @@ bench/envs
 apps/web/test-results/
 apps/web/dev-media/
 bench/refs/
+
+# deep-research scratch (reports are copied into bench/ when kept)
+/research_notes/
+/reports/

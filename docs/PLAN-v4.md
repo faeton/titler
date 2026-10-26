@@ -1,67 +1,69 @@
-# Titler — next stage: go public, anonymise faces, publish
+# Titler — next stage: faces, Stories out of the box
 
 2026-10-27. Follows [PLAN-v3.md](PLAN-v3.md): S1 (series), S2 (covers) and the server side of S3
-(auth, device keys, signed links) are done and verified on n5 (HANDOFF-v3 §4). Face anonymisation
-design: [PLAN-faces.md](PLAN-faces.md).
+(auth, device keys, signed links) are done and verified on n5 (HANDOFF-v3 §4).
+Design notes: [PLAN-faces.md](PLAN-faces.md) (face anonymisation),
+[REPORT-stories.md](../bench/REPORT-stories.md) (how Stories can be posted automatically).
 
 Same way of working as v3: develop on **n5**, push, `git pull` on the **Mac (m3max)** and re-run the
 checks; both runtimes stay green after every stage. The prompt for the n5 session is at the end.
 
+## What changed since PLAN-v3
+
+The owner mostly posts **Stories** (Instagram and Telegram), often to **Close Friends**, as a series
+of ~59 s parts. The Stories research settles what that means:
+
+- No official API can post to Close Friends. Instagram's Graph API posts public Stories only, and
+  only for professional accounts; Telegram's Bot API `postStory` only works for Business accounts
+  and has no audience.
+- **Telegram**: the user API (MTProto, `stories.sendStory`) supports every audience (close friends,
+  contacts, selected users, exclusions) and is permitted with the owner's own `api_id`. Free accounts
+  get 1 live story / 3 per week, which kills a series; **the owner has Premium**, so this is the
+  first automation target.
+- **Instagram**: Close Friends is only reachable through a private-API client (instagrapi). Its
+  login is fragile right now (open challenge-loop issues, Oct 2026) and it's against Instagram's
+  terms. **The owner doesn't want to log in yet**, so Instagram stays manual: Titler hands the
+  part to the phone and the owner finishes in the app.
+
+So the de1 gateway (PLAN-v3 S3 step A) and the official Instagram API (S4 Instagram) are **parked**:
+they only matter for public posts from a professional account. The server-side auth from S3 stays;
+it's what protects the Telegram session later.
+
 ## Goal of the stage
 
-A clip goes from upload to a **published** post with no other tool in between: faces of bystanders
-blurred, cut into parts, covered, and sent to Telegram, YouTube and Instagram from the Export screen.
-The metric stays the same: manual work between upload and publication.
+From upload to a posted Story series with as little manual work as possible:
+bystanders' faces blurred, cut into 59 s parts, Telegram Stories posted automatically to the chosen
+audience, Instagram parts one tap away on the phone.
 
 ## Stages
 
-| # | what | depends on | who | result |
-|---|---|---|---|---|
-| V0 | housekeeping: carry-overs from v3 | — | n5 session | known bugs closed before new work |
-| V1 | S3 rollout: Caddy on de1, gateway secret, owner token | — | **owner** (outward-facing) | Titler reachable from the internet |
-| V2 | F1 faces: detect + track, blur/pixelate/box everyone, preview, covers | — | n5 session | a clip with bystanders exports anonymised |
-| V3 | S4a publishing core + Telegram | V2 (fail-closed check) | n5 session + owner (bot) | publish to a channel from Titler |
-| V4 | S4b YouTube | V3 | n5 session + owner (Google project) | Shorts / series as playlist |
-| V5 | S4c Instagram Reels, then Stories | V1, V3 | n5 session + owner (Creator, Meta app) | Reels with cover from Titler |
-| V6 | F2 faces: people, only/except, manual boxes, review, eye bar/sticker | V2 | n5 session | "everyone except me" |
-| V7 | S5 cloud providers in the UI (Scribe v2, Claude review, EL align/isolator) | keys | n5 session | provider per step |
+| # | what | depends on | result |
+|---|---|---|---|
+| V0 | housekeeping: carry-overs from v3 | — | known bugs closed before new work (in progress) |
+| V1 | F1 faces: detect + track, blur/pixelate/box everyone, preview, covers | — | a clip with bystanders exports anonymised |
+| V2 | Stories export + phone handoff | — | every part one tap from the Instagram / Telegram composer |
+| V3 | Telegram Stories via the owner's account (Kurigram) | V1 (fail-closed), V2 (encode) | a series posted in order to close friends / contacts / chosen people |
+| V4 | F2 faces: people, only/except, manual boxes, review, eye bar/sticker | V1 | "everyone except me" |
+| V5 | cloud providers in the UI (Scribe v2, Claude review, EL align/isolator) | keys | provider per step |
+| — | parked: de1 gateway, official IG/YT/FB API publishing, instagrapi | owner decision | — |
 
-V1 and V2 are independent; V2 and V3 can run in parallel once V3's fail-closed hook for privacy is
-agreed (it's a single check in the publish job). V6 and V7 are the stretch part of this stage.
+V1 and V2 are independent and can run in parallel. V4 and V5 are the stretch part of this stage.
 
-### V0. Housekeeping (carry-overs from v3)
+### V0. Housekeeping (in progress)
 
-1. **Worker hang loading parakeet** (asr role hung 3 of 4 full smoke runs on n5). Add
-   `faulthandler.register(SIGUSR1)` to every worker at startup (not only through a wrapper) and a
-   server-side watchdog: a role that sends no line for N s during `load` gets SIGUSR1, its stack
-   is logged, then it's restarted once. Reproduce under load (smoke while e2e runs) and fix the cause
-   if the stack shows it (suspects: ORT thread pool vs. torch threads in one process, HF hub lock).
-2. **Series overlap + badge**: with the 0.5 s overlap the badge timing still starts at 0 of the
-   part; start it after the overlap.
-3. **Signed link revocation**: an "invalidate all links" button that rotates `signing_secret`
-   (the row exists), plus showing active links' count in «Доступ» (Access).
-4. **Passkey login** (WebAuthn) as an option beside the long owner token. Keep the token as the
-   fallback. Small, but it decides how comfortable the phone login is once V1 is live.
+1. **Worker hang loading parakeet**: faulthandler stack dumps in every worker, plus a server
+   watchdog that dumps, restarts once, then fails the job.
+2. **Series overlap + badge**: the badge starts after the overlap.
+3. **Signed link revocation**: rotate `signing_secret` from «Доступ» (Access).
+4. **Passkey login** beside the owner token (disabled with a reason until a public origin is set).
 
-### V1. S3 rollout on de1 (owner)
-
-Not done by the session: it's an outward-facing change on another box.
-- DNS name → de1; Caddy from `deploy/de1/Caddyfile.example`; TLS auto.
-- Gateway secret on both sides: `~/.config/titler/server.env` on n5 with `TITLER_GATEWAY_SECRET=…`,
-  then `sudo ./deploy/n5/start.sh`.
-- `pnpm --filter @titler/server auth owner`, log in from the phone over the public name, create a
-  device key for scripts.
-- Check: a request without the secret straight to n5's tailnet address still works (tailnet open);
-  through de1 without login → 401; a signed link opens in a private window; an expired one → 410.
-- The session prepares a `deploy/de1/README.md` checklist with exactly these steps.
-
-### V2. F1 faces (see PLAN-faces.md §6)
+### V1. F1 faces (see PLAN-faces.md §6)
 
 1. `faces` worker role + `faces` venv + capability probe on both runtimes (Vision on the Mac, YuNet
    and SCRFD on n5); tracker with unit tests on synthetic boxes (gaps, crossings, hold, interpolation).
 2. `bench/faces/`: labelling helper, `score.py`, `REPORT-faces.md`; choose the default detector per
    runtime from measured recall. Labels and frames stay in gitignored `bench/refs/faces/`.
-3. Core: `Privacy` type and defaults, `activeBoxes()`, migration for old projects.
+3. Core: `Privacy` type and defaults, `activeBoxes()`, defaults for old projects.
 4. Server: `faces` and `face_mask` jobs and artifacts; `framingGraph` takes an input label;
    `renderArgs` and `coverArgs` add the mask input and the `maskedmerge` chain; fail-closed when
    privacy is on and the mask is missing; per-part seek for series. `commands.test.ts` for vaapi,
@@ -70,81 +72,95 @@ Not done by the session: it's an outward-facing change on another box.
    with mode/style/strength/padding, track strip with thumbnails, tap a box → "not a face".
 6. e2e `--faces <blur|pixelate|box>`: sharpness inside sampled boxes drops below threshold in the
    output and the cover; series + faces together.
+7. The n5 iGPU (Radeon 890M): try `onnxruntime` with MIGraphX/ROCm for the detector, record the
+   numbers in `REPORT-faces.md`; adopt only if clearly faster and stable.
 
 Done when: e2e passes on n5 and the Mac; recall ≥ 95 % on the labelled set; a 64 s 9:16 render is at
 most 30 % slower with faces on.
 
-### V3. S4a publishing core + Telegram
+### V2. Stories export + phone handoff
 
-Core (shared by every platform, per spec-workflow "Publishing and audience"):
-- **Destinations**: a connected account per platform (`destinations` table: platform, name, target
-  such as channel id, audience, encrypted credentials in the data dir, never in the repo or logs).
-- **Publication jobs**: one per (artifact or series part, destination) with state
-  `prepared → uploading → processing → published | failed | finish_in_app`, the remote id, attempts
-  and an idempotency key. A retry first reconciles with the platform (does the remote object exist?)
-  and never posts twice. One platform failing doesn't roll back another.
-- **Caption composer**: text per destination, «(1/3)» appended for series parts, hashtags, length
-  limits per platform.
-- **Pre-send screen**: per destination the account, format, exact audience, caption, cover, final
-  video and the privacy state («Faces: blurred, reviewed» / «off»). Publishing is blocked if the
-  audience isn't available, and **blocked if privacy is on but the artifact predates the current
-  privacy settings**. No silent fallback to a public audience.
-- **Series**: parts publish in order; part N waits for part N−1 to reach `published`.
+1. **Story outputs per destination.** The Stories series preset (59 s) already exists. Add output
+   profiles:
+   - **Instagram Story**: 1080×1920 H.264 faststart MP4 (the current final encode).
+   - **Telegram Story**: 720×1280 H.265 (`hvc1`), keyframe every 1 s, streamable (faststart),
+     ≤ 30 MB, so ~3 Mbit/s video + 128 kbit/s AAC for 59 s; validated per part (size, duration,
+     codec), with a two-pass or capped-CRF fallback if a part comes out too big. Fits both encoder
+     kinds (`hevc_vaapi` on n5, `hevc_videotoolbox` on the Mac, `libx265` fallback).
+   - Captions and the «1/3» badge follow the existing series settings; nothing new per profile.
+2. **«Отправить» (Send) per part**: fetches the part as a `File` and calls
+   `navigator.share({ files: [file] })` from the tap (user gesture), so the iPhone share sheet opens
+   with the video; the owner picks Instagram or Telegram and finishes in the app (Close Friends
+   chosen there). Fallback when `navigator.canShare` says no: a plain download link.
+3. **«Сохранить все части» (Save all parts)**: shares/saves the parts in order, one gesture each
+   (iOS needs a gesture per share), with a "next: part 2/3" button so it's a quick tap sequence.
+4. **Device check, recorded in `bench/REPORT-stories.md`**: what the Instagram and Telegram share
+   extensions open for a shared video on the owner's iPhone (Story composer or not), and whether
+   Close Friends is selectable from there. This decides how good the manual path is.
+5. Part captions: a short text per part (default «(1/3)») copied to the clipboard with the share,
+   since Stories have no caption field on Instagram (Telegram does: used by V3).
 
-Telegram:
-- Bot token + channel set up by the owner; the bot needs post rights. `sendVideo` with
-  `supports_streaming`, `cover` from the S2 JPEG, `thumbnail` (≤ 320 px, < 200 kB, generated),
-  caption. ≤ 50 MB through the cloud Bot API; above that, a clear "too large" with the size, and an
-  optional local Bot API server later (up to 2 GB).
-- Test with a private test channel; e2e `--publish telegram` gated on an env token, skipped otherwise.
+### V3. Telegram Stories via the owner's account
 
-### V4. S4b YouTube
+Per REPORT-stories.md: Kurigram (maintained Pyrogram fork, `send_story` with privacy settings).
 
-- Google Cloud project, OAuth consent screen moved to "In production" (in "Testing" refresh tokens
-  die after 7 days), channel phone-verified (needed for `thumbnails.set`).
-- Resumable `videos.insert`; privacy chosen per publication (default unlisted for the first run);
-  `thumbnails.set` for regular videos (Shorts custom thumbnails likely unsupported: report what the
-  API returns); series → playlist (`playlists.insert`, `playlistItems.insert`).
-- First upload doubles as the check for the unverified-project private lock (REPORT-publishing).
+1. **Worker role `telegram`** (new venv `tg`: `kurigram`, `tgcrypto`), owner's own `api_id`/`api_hash`
+   from my.telegram.org in `~/.config/titler/server.env` (never in the repo or logs).
+2. **One-time login** from the web («Доступ» → «Telegram»): phone → code → 2FA password, relayed
+   through the worker; the session file lives in the data dir with mode 600, and the UI shows
+   "connected as …" and a «Выйти» (Log out) that terminates the session on Telegram's side too.
+3. **Audience per series**: everyone / contacts / close friends / selected people, plus "except" list;
+   pickers fed from the account's contacts and current close friends list (read-only in this stage).
+   Story period (6/12/24/48 h), `pinned` (post to profile), `noforwards` (protect content), caption.
+4. **Publication jobs** (the core from PLAN-v3 §5 / spec-workflow, Telegram only for now):
+   one job per part with state `prepared → uploading → published | failed`, remote story id,
+   attempts, idempotency key; a retry first checks whether the story exists (`stories.getStoriesByID`)
+   and never posts twice. Parts go strictly in order, each waiting for the previous to be confirmed.
+   `stories.canSendStory` is checked before each part; quota or FloodWait → the series pauses and
+   the UI says why and when it can resume. No retry storms.
+5. **Pre-send screen**: per part the account, exact audience, period, caption, final video and the
+   privacy state («Faces: blurred, reviewed» / «off»). **Blocked if privacy is on but the part
+   predates the current privacy settings.** No silent fallback to "everyone": if the chosen audience
+   can't be built (e.g. a picked user isn't a contact), it stops.
+6. Tests: unit tests with a fake client; a live test only with `TITLER_TG_TEST=1` and a story posted
+   to a "selected users: only myself" audience (or the smallest audience Telegram allows), deleted
+   right after.
 
-### V5. S4c Instagram
+### V4. F2 faces, V5. cloud providers
 
-- Owner: account to **Creator**, a Meta app in dev mode with the account as tester, Instagram Login
-  (`instagram_business_basic`, `instagram_business_content_publish`).
-- Container create with `video_url` = a signed de1 link (needs V1), `cover_url` likewise, poll
-  `status_code`, then `media_publish`. Reels first; Stories after checking they work on Creator.
-- "Link a Reel" for a series is app-only: after publishing, the UI shows a reminder with the
-  parts in order.
+As in PLAN-faces.md §6 (F2) and PLAN-v3 §1 / S5. Start only when V1–V3 are green or blocked.
 
-### V6. F2 faces, V7. cloud providers
+### Parked
 
-As in PLAN-faces.md §6 (F2) and PLAN-v3 §1 / S5. Start only when V2–V5 are green or blocked on the
-owner.
+- de1 gateway (PLAN-v3 S3 step A): needed only for platforms that fetch media by public URL.
+  The checklist is in PLAN-v3 §2; nothing to do until a public API path is chosen.
+- Official publishing APIs (Instagram Graph, YouTube, Facebook Reels, TikTok): public posts only.
+- instagrapi (Instagram private API): the only way to automate Instagram Close Friends. Revisit when
+  the owner wants it; first step then is one throwaway test story from n5, with the login approved in
+  the app, a pinned library version and `with_challenge_flow=False`.
 
 ## Things the owner has to do
 
 | when | what |
 |---|---|
-| V1 | DNS + Caddy on de1, gateway secret on n5, create owner token |
-| V2 | label faces on ~10 clips with the helper (≈ 30 min), or approve a smaller set |
-| V3 | create a Telegram bot, add it to a test channel and the real channel with post rights |
-| V4 | Google Cloud project, consent screen to production, phone-verify the channel |
-| V5 | switch IG to Creator, create the Meta app, add the account as tester |
-| V7 | ElevenLabs / Anthropic keys in `~/.config/titler/server.env` |
+| V1 | label faces on ~10 clips with the helper (≈ 30 min), or approve a smaller set |
+| V2 | on the iPhone: share one part to Instagram and to Telegram, note which composer opens |
+| V3 | create an app at my.telegram.org (api_id/api_hash) and put them in `server.env` on n5; log in once from the web UI |
+| V5 | ElevenLabs / Anthropic keys in `server.env` |
 
 ## My decisions (review)
 
-- Faces before publishing: once publishing is one tap, an unblurred bystander is one tap from going
-  out. The fail-closed check in the publish job is part of V3, not V2.
-- Telegram first, Instagram last, as in PLAN-v3 (friction order); TikTok and Facebook Reels stay out
-  of this stage.
-- Platform credentials live encrypted in the data dir (key from `server.env`), not in `settings_kv`
-  plaintext.
-- Publishing defaults to the least public audience each platform offers (unlisted / test channel)
-  until the owner switches a destination to its real audience.
-- The n5 iGPU (Radeon 890M) stays an experiment: try `onnxruntime` with MIGraphX/ROCm for the face
-  detector during V2 and record the numbers in `REPORT-faces.md`; adopt only if it's clearly faster
-  and stable.
+- Faces before Telegram automation: once posting is one tap, an unblurred bystander is one tap from
+  going out. The fail-closed check is part of V3's pre-send, not optional.
+- Telegram through the owner's own account (MTProto), not a bot: only that path has audiences.
+- Kurigram over Telethon: it has a ready `send_story` with privacy settings; Telethon only exposes the
+  raw request and moved to Codeberg. If Kurigram stalls, the raw `stories.sendStory` call is small
+  enough to port.
+- Telegram Story encode at 720×1280 HEVC to match the only documented spec; 1080×1920 uploads may
+  also work, but untested sizes aren't worth a failed series.
+- Instagram stays manual (share sheet) until the owner decides on instagrapi.
+- The Telegram session file is as powerful as the account: data dir, mode 600, never logged, never
+  served by any route, and covered by the server's auth (S3) if the gateway is ever enabled.
 
 ---
 
@@ -155,44 +171,47 @@ Paste into Claude Code in `~/work/titler` on n5:
 
 ---
 
-Implement PLAN-v4 stages **V0 (housekeeping)** and **V2 (F1 faces)**, then **V3 (publishing core +
-Telegram)** if time allows. V1 is the owner's; only write `deploy/de1/README.md` for it.
+Implement PLAN-v4 stages **V1 (F1 faces)** and **V2 (Stories export + phone handoff)**, then **V3
+(Telegram Stories)** if time allows. V0 is being done separately; pull it first if it has landed.
 
-Read first: `docs/PLAN-v4.md`, `docs/PLAN-faces.md`, `docs/spec-workflow.md` ("Framing and captions",
-"Publishing and audience"), `docs/PLAN-v3.md` §5, `docs/HANDOFF-v3.md` §4 (what v3 left),
-`apps/server/src/media/commands.ts` (`framingGraph`, `renderArgs`, `coverArgs`),
+Read first: `docs/PLAN-v4.md`, `docs/PLAN-faces.md`, `bench/REPORT-stories.md`,
+`docs/spec-workflow.md` ("Framing and captions", "Publishing and audience"), `docs/HANDOFF-v3.md` §4,
+`apps/server/src/media/commands.ts` (`framingGraph`, `renderArgs`, `coverArgs`, encoders),
 `apps/server/src/pipeline/render.ts` and `cover.ts`, `apps/web/src/player/Stage.tsx`,
-`workers/titler_worker/__main__.py` and `docs/worker-protocol.md`.
+`apps/web/src/features/export/`, `workers/titler_worker/__main__.py` and `docs/worker-protocol.md`.
 
 Constraints:
 - Don't break either runtime: no Linux- or Mac-only code paths without a capability probe (the Vision
-  detector is Mac-only, so it must be probed; YuNet/SCRFD must work on both). `pnpm test`,
-  `pnpm typecheck`, `workers/smoke.py` and `e2e.ts` must pass on n5. The owner re-runs them on the Mac.
+  detector is Mac-only, so it must be probed; YuNet/SCRFD must work on both; HEVC encode must work
+  with vaapi, videotoolbox and libx265). `pnpm test`, `pnpm typecheck`, `workers/smoke.py` and
+  `e2e.ts` must pass on n5. The owner re-runs them on the Mac.
 - **The repo is public.** Never commit clip transcripts, quotes, frames, face thumbnails, face
-  labels, tailnet names/IPs, tokens or keys. Unit tests use synthetic boxes; real data stays in
-  gitignored `bench/refs`, `bench/runs`, `bench/samples`.
-- Fail closed: privacy on + missing/stale mask → render, cover and publish refuse with a clear error.
-- No cloud calls (keys aren't set). Telegram tests only with `TITLER_TG_TEST_TOKEN` +
-  `TITLER_TG_TEST_CHAT` in the env; skip otherwise.
+  labels, tailnet names/IPs, tokens, keys, api_id/api_hash or session files. Unit tests use synthetic
+  data; real data stays in gitignored `bench/refs`, `bench/runs`, `bench/samples`.
+- Fail closed: privacy on + missing/stale mask → render, cover, share and publish refuse with a clear
+  error.
+- No cloud calls. No Instagram login of any kind. Telegram: no live calls unless `TITLER_TG_TEST=1`
+  is set and the owner has logged in; tests use a fake client otherwise.
 - Small focused commits; push when a stage is green.
 - At the end, write `docs/HANDOFF-v4.md` (same shape as HANDOFF-v3 §4): what was done, the measured
-  numbers (detector recall and ms/frame per runtime, render overhead), what's left, and the exact
-  commands to verify on the Mac.
+  numbers (detector recall and ms/frame per runtime, render overhead, Telegram encode sizes), what's
+  left, and the exact commands to verify on the Mac.
 
 ---
 
 ## Back on the Mac (after the n5 session)
 
 ```bash
-cd ~/Sites/titler && git pull && ./deploy/mac/setup.sh      # picks up the faces venv
+cd ~/Sites/titler && git pull && ./deploy/mac/setup.sh      # picks up the faces (and tg) venvs
 pnpm test && pnpm typecheck
-bench/envs/align-main/bin/python workers/smoke.py            # includes the faces role
+bench/envs/align-main/bin/python workers/smoke.py
 pnpm --filter @titler/web build
 pnpm --filter @titler/server start &
 pnpm --filter @titler/server e2e --compare
 pnpm --filter @titler/server e2e <clip with bystanders> --faces blur
-pnpm --filter @titler/server e2e <clip with bystanders> --faces pixelate --series 25000 --expect-parts 3
+pnpm --filter @titler/server e2e <clip with bystanders> --faces pixelate --series stories --expect-parts 2
 ```
 
-Then on the phone: Frame → «Лица» (Faces) → all, blur → scrub through the clip → mark one false
-positive → Export → cover for part 1 → check faces are blurred in the video and on the cover.
+Then on the phone: Frame → «Лица» (Faces) → all, blur → scrub → mark one false positive → Export →
+Stories → «Отправить» (Send) part 1 → share to Instagram and to Telegram → check the composer and
+that faces are blurred.
