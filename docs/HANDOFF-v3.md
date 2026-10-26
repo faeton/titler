@@ -25,9 +25,9 @@ Paste into Claude Code in `~/work/titler` on n5:
 ---
 
 Implement PLAN-v3 stages **S1 (series)** and **S2 (covers)**, then S3 if time allows.
-Read first: `docs/PLAN-v3.md` (the plan; §3 series, §4 covers, §2 public API, "Мои решения"),
+Read first: `docs/PLAN-v3.md` (the plan; §3 series, §4 covers, §2 public API, "My decisions"),
 `bench/REPORT-publishing.md` (platform limits), `docs/PLAN-v2.md`, `docs/spec-workflow.md`
-("Публикация"), `docs/mac.md` (the second runtime), `packages/core/src/cues.ts` and
+("Publishing and audience"), `docs/mac.md` (the second runtime), `packages/core/src/cues.ts` and
 `apps/server/src/pipeline/render.ts` (where parts plug in).
 
 S1 — series:
@@ -38,7 +38,7 @@ S1 — series:
    tail rebalance, every part ≤ max, never inside a word.
 2. Presets: IG Stories 59 s, IG Reels / YT Shorts / TikTok 179 s, FB Reels 89 s, Telegram none, custom.
    Series plan is per destination and stored in project settings (cuts editable).
-3. Numbering overlay «1/3» / «Часть 1 из 3»: option, shown when parts ≥ threshold (default 3),
+3. Numbering overlay «1/3» / «Часть 1 из 3» ("Part 1 of 3"): option, shown when parts ≥ threshold (default 3),
    top safe zone, first 2–3 s or whole part — drawn through the cue compiler so preview == ASS.
 4. Render each part as its own artifact over `[t0, t1]` (accurate seek, trimmed audio variant,
    cues split and re-based), names `…_p1of3.mp4`, per-part validation (duration ≤ max, A/V sync),
@@ -126,7 +126,7 @@ part ≤ its limit.
   before encoding. Progress and caching are per part. Whole-clip artifact keys are unchanged.
   `commands.test.ts` covers vaapi, videotoolbox and libx264.
 - Export screen: destination grid, timeline (parts, pause ticks, playhead; drag a cut and it snaps to the
-  nearest pause; tap a part to play it; «Авто» resets), part lengths in red when over the limit, numbering
+  nearest pause; tap a part to play it; «Авто» (Auto) resets), part lengths in red when over the limit, numbering
   options (format, 2.5 s or whole part, 2+ or 3+ parts), 0.5 s overlap toggle, one caption per part with
   «(1/3)», outputs grouped by part. On this tab the stage previews each part's own cue layout and the
   badge, using the same core functions as the render.
@@ -145,7 +145,7 @@ part ≤ its limit.
   `GET /cover/suggestions` scans proxy edge density at 4 fps, once per proxy (0.6 s for 64 s).
   `GET /frame/<ms>.jpg` serves cached thumbnails. Title and badge go in the request, so the JPEG matches
   the preview even if the debounced settings PATCH hasn't landed yet.
-- Export screen «Обложка»: format, part, ‹ кадр / кадр ›, suggested frames, title, badge toggle. The
+- Export screen «Обложка» (Cover): format, part, ‹ кадр / кадр › (frame back / forward), suggested frames, title, badge toggle. The
   canvas preview draws the proxy frame with the same framing and core layout, with IG grid (dashed) and
   16:9 (dotted) guides. Covers are listed with download links.
 
@@ -160,8 +160,8 @@ part ≤ its limit.
   Rate limits per client: 10 logins/min, 1200 requests/min. DB migration 2 adds `auth_keys`, `sessions`
   and `settings_kv`.
 - CLI: `pnpm --filter @titler/server auth owner [name] | device <name> | list | revoke <id>`.
-- Web: the login screen appears only when the server asks for it. «Доступ» (projects header) lists,
-  creates (shown once) and revokes device keys, and has «Выйти».
+- Web: the login screen appears only when the server asks for it. «Доступ» (Access, projects header) lists,
+  creates (shown once) and revokes device keys, and has «Выйти» (Log out).
 - `deploy/de1/Caddyfile.example` (placeholders, no names). `deploy/n5/start.sh` now loads the optional
   `~/.config/titler/server.env`; the file doesn't exist yet.
 
@@ -204,4 +204,4 @@ GATEWAY_SECRET=s OWNER_TOKEN=to_… node apps/web/scripts/smoke-access.mjs http:
 ```
 
 On the phone: Export → pick Stories / custom → drag a cut → play a part (badge, captions) → «Экспортировать
-N частей» → make a cover for part 2 → download.
+N частей» (Export N parts) → make a cover for part 2 → download.

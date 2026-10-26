@@ -1,4 +1,4 @@
-# Speech enhancement / voice cleanup benchmark (Titler, «Выбор голоса»)
+# Speech enhancement / voice cleanup benchmark (Titler, «Выбор голоса» / Voice choice)
 
 Date: 2026-10-24 · host n5 (CPU only, 8 threads, other benchmarks running concurrently, so
 absolute RTFs are pessimistic by maybe 1.2–2×; relative order holds) · clips: `samples/audio/video-{34238,34442,34585}`

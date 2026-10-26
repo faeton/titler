@@ -1,151 +1,151 @@
 # Titler — target workflow spec (owner's brief, 2026-10-24)
 
-Source text from the owner, kept verbatim (Russian). This is the target the
-redesign works toward; nothing here is implemented yet unless the code says so.
+The owner's brief, translated from Russian (the original is in git history before 2026-10-27).
+This is the target the redesign works toward; nothing here is implemented yet unless the code says so.
 
-Это спецификация переработанного сценария: загрузить видео с очков, выбрать естественный и разборчивый звук, быстро исправить расшифровку, подготовить кадр и субтитры, затем опубликовать отдельные версии в нужные соцсети. Главная метрика качства продукта - сколько ручной работы остаётся между загрузкой ролика и готовой публикацией.
+This is the spec for the reworked workflow: upload video from the glasses, choose natural and intelligible sound, quickly fix the transcript, prepare the frame and captions, then publish separate versions to the right social networks. The main product quality metric is how much manual work is left between uploading a clip and a finished publication.
 
-Приоритет языков: примерно 90% русского, также смешанная русско-украинская речь и английский. Проект - [faeton/titler](https://github.com/faeton/titler). Требуется комфортная работа с телефона. Ниже описано развитие существующего Titler; предлагаемые возможности не следует считать уже реализованными.
+Language priority: about 90% Russian, plus mixed Russian-Ukrainian speech and English. Project: [faeton/titler](https://github.com/faeton/titler). Comfortable work from a phone is required. Below is how the existing Titler evolves; the proposed features should not be treated as already implemented.
 
-# Пользовательский сценарий
+# User workflow
 
-Загрузка → сравнение звука → распознавание → проверка спорных мест → правка слов и таймингов → кадрирование и оформление → проверка отдельных публикаций.
+Upload → compare sound → recognise → review disputed spots → edit words and timings → framing and styling → review separate publications.
 
-После загрузки пользователь сразу видит видеопревью и состояние обработки. Работу можно продолжить после закрытия вкладки. Исходник сохраняется неизменным, каждый результат связан с версией проекта. Обработка длинного ролика не должна блокировать прослушивание уже готового фрагмента.
+After upload the user immediately sees a video preview and the processing state. Work can continue after the tab is closed. The source is kept unchanged; every result is tied to a project version. Processing a long clip must not block listening to a fragment that is already ready.
 
-# Выбор голоса
+# Voice choice
 
-Сначала система готовит короткие сравнимые фрагменты: обычная речь, сложный участок с ветром или транспортом и, при наличии, участок с чужими голосами. Пользователь также может выбрать любой собственный отрезок.
+First the system prepares short comparable fragments: normal speech, a hard section with wind or traffic and, if present, a section with other people's voices. The user can also pick any segment of their own.
 
-На одном и том же отрезке доступны исходник и три стартовых варианта: мягкая очистка с сохранением окружения, более выраженный голос, сильное подавление фона. Это пресеты, внутри которых можно менять уровень голоса и остаточный фон. Отдельные переключатели включают устранение гула или выравнивание громкости. Все варианты сравниваются при сопоставимой воспринимаемой громкости: более громкий вариант не должен выигрывать только из-за громкости.
+On the same segment the source and three starting variants are available: gentle cleanup that keeps the surroundings, a more pronounced voice, strong background suppression. These are presets within which voice level and residual background can be adjusted. Separate toggles enable hum removal or loudness levelling. All variants are compared at comparable perceived loudness: a louder variant must not win just because it is louder.
 
-Переключение A/B/C сохраняет позицию воспроизведения. Есть зацикливание, быстрый возврат к исходнику и отметка «выбрать для всего ролика». Сложный участок может иметь собственный пресет; на стыках нужен плавный переход.
+Switching A/B/C keeps the playback position. There is looping, a quick return to the source and a "use for the whole clip" mark. A hard section can have its own preset; the joins need a smooth transition.
 
-Усилить всю речь и выделить именно голос владельца - разные задачи. Если требуется подавлять других говрящих, нужен отдельный режим выделения целевого говорящего. Пользователь отмечает чистый фрагмент своего голоса; при недостаточном качестве система просит другой фрагмент или оставляет обычную очистку. Автоматически удалять чужие реплики из диалога нельзя.
+Boosting all speech and isolating the owner's voice specifically are different tasks. If other speakers need to be suppressed, a separate target-speaker mode is needed. The user marks a clean fragment of their voice; if its quality is insufficient, the system asks for another fragment or falls back to normal cleanup. Automatically removing other people's lines from a dialogue is not allowed.
 
-Для сохранения окружения предпочтительны отдельные согласованные по времени дорожки речи и фона. Простое смешивание обработанной речи с исходником может удвоить голос и вызвать фазовые артефакты. Если достоверного разделения нет, интерфейс управляет силой очистки, не обещая независимую регулировку фона.
+To keep the surroundings, separate time-aligned speech and background tracks are preferable. Simply mixing processed speech with the source can double the voice and cause phase artifacts. If there is no reliable separation, the interface controls cleanup strength without promising independent background control.
 
-Обработка не должна менять длительность и синхронизацию с видео. Компенсация задержки модели обязательна. Сильное подавление может испортить согласные; отсутствующую в записи речь нельзя достоверно восстановить. Синтез нового голоса не входит в базовый сценарий.
+Processing must not change duration or sync with the video. Model latency compensation is mandatory. Strong suppression can damage consonants; speech that is missing from the recording cannot be reliably restored. Synthesising a new voice is not part of the base workflow.
 
-# Распознавание и выбор вариантов
+# Recognition and choosing variants
 
-Выбранный пользователем звук становится основной дорожкой для прослушивания. Для распознавания система может сравнивать его с исходной или мягко очищенной дорожкой: самый приятный звук не обязательно даёт наименьшее число ошибок ASR.
+The sound the user chose becomes the main listening track. For recognition the system may compare it with the source or the gently cleaned track: the most pleasant sound doesn't necessarily give the fewest ASR errors.
 
-Первый проход создаёт текст, предварительные тайминги и кандидатов на проверку. Второй независимый распознаватель обрабатывает весь короткий ролик либо спорные участки длинного. Не следует запускать все модели на всех вариантах звука по умолчанию: это увеличивает задержку и стоимость без гарантии пользы.
+The first pass produces text, preliminary timings and review candidates. A second independent recogniser processes the whole short clip or the disputed sections of a long one. Running all models on all sound variants by default should be avoided: it increases latency and cost with no guaranteed benefit.
 
-Для каждого спорного диапазона сохраняются варианты моделей, источник каждого варианта и применённая обработка аудио. Альтернативы могут охватывать несколько слов: одна модель слышит одно слово, другая два. Нельзя предполагать совпадение числа токенов.
+For each disputed range the model variants, the source of each variant and the audio processing applied are stored. Alternatives can span several words: one model hears one word, another two. Equal token counts must not be assumed.
 
-Пользователь видит понятные причины проверки: «модели услышали по-разному», «речь без текста», «сомнительная граница», «имя из словаря». Численные confidence разных моделей напрямую не сравниваются. Совпадение моделей не гарантирует правильность.
+The user sees clear review reasons: "models heard it differently", "speech without text", "doubtful boundary", "name from the dictionary". Numeric confidences of different models are not compared directly. Models agreeing doesn't guarantee correctness.
 
-Встроенный словарь поддерживает имена, Awerti, Esports Charts, Streams Charts, названия мест и другие пользовательские термины. Система предлагает написание, но не подставляет эти слова в каждый неясный участок.
+A built-in dictionary supports names, Awerti, Esports Charts, Streams Charts, place names and other user terms. The system suggests spellings but doesn't substitute these words into every unclear spot.
 
-Проверка языковой моделью предлагает контекстные исправления отдельно от акустических гипотез. Подсказка «по смыслу» явно маркируется. Утверждённые пользователем слова не переписываются автоматически. Смешанная русско-украинская речь сохраняется как произнесена; перевод в один язык является отдельной операцией.
+A language-model review proposes contextual fixes separately from acoustic hypotheses. A "by meaning" suggestion is explicitly marked. Words the user approved are not rewritten automatically. Mixed Russian-Ukrainian speech is kept as spoken; translating into one language is a separate operation.
 
-# Редактор текста и воспроизведения
+# Text and playback editor
 
-Основная область показывает читабельные фразы и абзацы. Каждое слово связано с аудио, но текст не должен выглядеть как сотня отдельных кнопок. При воспроизведении подсвечивается текущее слово. Автопрокрутка приостанавливается, когда пользователь читает или редактирует другой участок.
+The main area shows readable phrases and paragraphs. Every word is linked to audio, but the text must not look like a hundred separate buttons. During playback the current word is highlighted. Auto-scroll pauses while the user reads or edits another section.
 
-На телефоне сверху находится компактное видео, ниже текст, внизу закреплены воспроизведение и контекстные действия. При открытии клавиатуры видео уменьшается, редактируемая строка остаётся видимой. Кнопки должны иметь достаточно крупные области касания; для коротких слов предусмотрено увеличение контекста.
+On the phone a compact video is at the top, the text below, playback and contextual actions pinned at the bottom. When the keyboard opens the video shrinks and the edited line stays visible. Buttons need large enough touch targets; for short words there is expanded context.
 
-| Действие | Телефон | Компьютер |
+| Action | Phone | Desktop |
 | - | - | - |
-| Выбрать слово | Одно касание выделяет слово и ставит позицию воспроизведения | Щелчок в режиме просмотра |
-| Прослушать контекст | Кнопка рядом с выбранным словом, короткий цикл с соседними словами | Клавиша воспроизведения вне режима набора |
-| Исправить слово | Повторное касание или явная кнопка «Править» открывает клавиатуру | Enter или переход в режим редактирования |
-| Выбрать подсказку | Нижняя панель с вариантами и их источниками | Панель и управление стрелками |
-| Выделить диапазон | Удержание открывает выделение и меню | Shift и клавиши перемещения |
-| Вставить пропущенное | «Вставить перед/после» либо выбор диапазона на звуковой дорожке | Обычный ввод в позиции курсора |
-| Изменить тайминг | Отдельный режим с крупными ручками границ | Перетаскивание границ и точная настройка |
-| Отменить | Всегда доступная кнопка | Cmd/Ctrl+Z, повтор отмены |
+| Select a word | One tap selects the word and sets the playback position | Click in view mode |
+| Listen to context | A button next to the selected word, a short loop with neighbouring words | Play key outside typing mode |
+| Fix a word | A second tap or an explicit "Edit" button opens the keyboard | Enter or switching to edit mode |
+| Pick a suggestion | Bottom panel with variants and their sources | Panel and arrow keys |
+| Select a range | Long press opens selection and a menu | Shift and movement keys |
+| Insert a missing word | "Insert before/after" or selecting a range on the audio track | Normal typing at the cursor |
+| Change timing | A separate mode with large boundary handles | Dragging boundaries and fine adjustment |
+| Undo | An always-available button | Cmd/Ctrl+Z, redo |
 
-Одно касание не включает неожиданное автовоспроизведение. Удержание не удаляет и не перемещает слово само по себе. Удаление, замена и слияние доступны явно и отменяются одним действием.
+A single tap doesn't start unexpected autoplay. A long press doesn't delete or move a word by itself. Delete, replace and merge are explicit and undone with one action.
 
-Редактирование поддерживает обычную клавиатуру: курсор, выделение, вставку текста, Backspace, Delete, Enter, вставку нескольких слов и замену целого диапазона. Во время набора пробел печатает пробел. Горячие клавиши плеера не перехватывают текстовый ввод и композицию мобильной клавиатуры.
+Editing supports a normal keyboard: cursor, selection, text insertion, Backspace, Delete, Enter, inserting several words and replacing a whole range. While typing, space types a space. Player hotkeys don't intercept text input or mobile keyboard composition.
 
-Нужны две явно различимые операции: «убрать из субтитров» и «вырезать из видео». Обычное исправление текста меняет только расшифровку. Монтаж по тексту, если добавляется, работает отдельным режимом с предварительным просмотром результата.
+Two clearly distinct operations are needed: "remove from captions" and "cut from the video". A normal text fix changes only the transcript. Text-based editing, if added, works as a separate mode with a preview of the result.
 
-Быстрая проверка переходит между спорными местами, а не заставляет перечитывать ролик целиком. После правки можно отметить диапазон проверенным и перейти к следующему.
+Quick review jumps between disputed spots instead of making the user reread the whole clip. After a fix the range can be marked reviewed and the next one opened.
 
-# Пропущенные слова и точные тайминги
+# Missing words and exact timings
 
-У каждой единицы текста есть стабильный ID, начало и конец в исходной записи, источник текста, варианты распознавания, статус пользовательской проверки и отдельный статус тайминга: предварительный, выровненный или выставленный вручную. Пунктуация не обязана иметь собственный аудиоинтервал.
+Every text unit has a stable ID, a start and end in the source recording, a text source, recognition variants, a user review status and a separate timing status: preliminary, aligned or set by hand. Punctuation doesn't need its own audio interval.
 
-Сценарий вставки: система распознала «я приехал Самоа», а в записи есть «я приехал на Самоа». Пользователь ставит курсор между словами, вводит «на», затем система повторно выравнивает небольшую фразу с соседними словами. Она может немного изменить соседние границы, не затрагивая подтверждённые ручные якоря.
+Insertion scenario: the system recognised «я приехал Самоа» ("I arrived Samoa") and the recording has «я приехал на Самоа» ("I arrived in Samoa"). The user puts the cursor between the words, types «на», then the system re-aligns a small phrase with the neighbouring words. It may slightly change neighbouring boundaries without touching confirmed manual anchors.
 
-Если слово пропущено целиком, пользователь раскрывает волну звука, слушает участок, выделяет диапазон и нажимает «Добавить слово». Волну можно масштабировать; воспроизведение выделения повторяется по кругу. Дополнительный спектральный вид полезен для сложных случаев, но не нужен в основном интерфейсе.
+If a word is missed entirely, the user expands the waveform, listens to the section, selects a range and taps "Add word". The waveform can be zoomed; playback of the selection loops. An extra spectral view is useful for hard cases but isn't needed in the main interface.
 
-Волна звука показывает энергию, а не готовые границы слов. Разметка речевых участков служит ориентиром. Отсутствие свободного промежутка между соседними словами не запрещает вставку: прежние границы могли быть неверными.
+The waveform shows energy, not ready word boundaries. Speech region marks serve as guidance. The absence of a free gap between neighbouring words doesn't forbid insertion: the previous boundaries may have been wrong.
 
-При успешном акустическом выравнивании слово получает новый интервал. При неудаче оно остаётся с пометкой «тайминг не подтверждён» и доступной ручной настройкой. Распределение времени по длине слов допустимо только как временное приближение.
+When acoustic alignment succeeds, the word gets a new interval. When it fails, the word stays marked "timing not confirmed" with manual adjustment available. Distributing time by word length is acceptable only as a temporary approximation.
 
-При слиянии, разделении, вставке нескольких слов и правке языка повторно выравнивается локальная фраза. Изменение запятой не запускает обработку всего ролика. Перезапуск ASR сохраняет подтверждённые правки и ручные границы.
+On merge, split, multi-word insertion and language edits the local phrase is re-aligned. Changing a comma doesn't trigger processing of the whole clip. Re-running ASR keeps confirmed edits and manual boundaries.
 
-После монтажных вырезаний существует отдельная карта соответствия исходного и экспортного времени. Слова, субтитры и кадрирование используют эту карту, чтобы монтаж не ломал синхронизацию.
+After editing cuts there is a separate map between source and export time. Words, captions and framing use this map so that editing doesn't break sync.
 
-# Кадрирование и субтитры
+# Framing and captions
 
-Форматы: 9:16, 16:9 и исходное соотношение сторон. Для каждого доступны заполнение кадра с обрезкой и размещение целиком с полями или фоном. Пользователь видит, что именно будет потеряно.
+Formats: 9:16, 16:9 and the source aspect ratio. Each offers fill with cropping and fit with margins or a background. The user sees exactly what will be lost.
 
-Автоматическое кадрирование предлагает область интереса, но всегда доступен ручной сдвиг и ключевые точки по времени. В POV-видео лицо автора обычно не является объектом кадра; нельзя безусловно строить crop вокруг лица.
+Automatic framing proposes a region of interest, but manual offset and time keyframes are always available. In POV video the author's face is usually not the subject; the crop must not be built around a face unconditionally.
 
-Предпросмотр учитывает выбранную площадку и зоны её интерфейса. Расшифровка хранится отдельно от оформления субтитров: изменение шрифта, переносов и размера не меняет текст и тайминги слов. Поддерживаются фразовые субтитры и, по желанию, подсветка текущего слова.
+The preview accounts for the chosen platform and its interface zones. The transcript is stored separately from caption styling: changing font, line breaks and size doesn't change the text or word timings. Phrase captions are supported and, optionally, highlighting of the current word.
 
-Экспорт включает видео с выбранной звуковой дорожкой, вариант с вшитыми субтитрами, чистый вариант и SRT/VTT при необходимости. Итоговое видео проверяется на синхронизацию, обрезанные строки и выход текста за границы кадра.
+Export includes video with the chosen audio track, a version with burned-in captions, a clean version and SRT/VTT when needed. The final video is checked for sync, cut-off lines and text going outside the frame.
 
-# Кандидаты моделей
+# Model candidates
 
-Это набор для сравнительного теста, а не объявленный победитель.
+This is a set for a comparative test, not an announced winner.
 
-| Задача | Стартовый кандидат | Условия выбора |
+| Task | Starting candidate | Selection criteria |
 | - | - | - |
-| Мягкая очистка | DeepFilterNet | Full-band обработка; проверить ветер, тихие согласные и задержку |
-| Более сильная очистка | FRCRN или MossFormer из ClearerVoice-Studio | Сравнить артефакты и сохранение тембра; enhancement и выделение говорящего оценивать отдельно |
-| Базовое распознавание RU/UA/EN | Whisper large-v3 | Проверять на реальном смешении языков; не принуждать весь файл к русскому |
-| Независимое облачное распознавание | ElevenLabs Scribe v2 | Заявлены многоязычность, тайминги слов и подсказки терминов; требуется отправка аудио провайдеру |
-| Дополнительный локальный русский кандидат | GigaAM-v3 | Проект Salute/Sber; использовать только если происхождение приемлемо. Локальный запуск не требует отправки записи этому провайдеру |
-| Уточнение границ | WhisperX и языковые aligner-модели | После исправления текста; смешанная речь, числа и наложенные голоса требуют отдельной проверки |
+| Gentle cleanup | DeepFilterNet | Full-band processing; check wind, quiet consonants and latency |
+| Stronger cleanup | FRCRN or MossFormer from ClearerVoice-Studio | Compare artifacts and timbre preservation; evaluate enhancement and speaker isolation separately |
+| Base RU/UA/EN recognition | Whisper large-v3 | Test on real language mixing; don't force the whole file to Russian |
+| Independent cloud recognition | ElevenLabs Scribe v2 | Claims multilingual support, word timings and term hints; audio has to be sent to the provider |
+| Additional local Russian candidate | GigaAM-v3 | A Salute/Sber project; use only if the provenance is acceptable. Running locally doesn't send the recording to this provider |
+| Boundary refinement | WhisperX and language aligner models | After fixing the text; mixed speech, numbers and overlapping voices need separate checks |
 
-[DeepFilterNet](https://github.com/Rikorose/DeepFilterNet), [ClearerVoice-Studio](https://github.com/modelscope/ClearerVoice-Studio), [Whisper](https://github.com/openai/whisper), [Scribe](https://elevenlabs.io/docs/overview/capabilities/speech-to-text), [GigaAM](https://github.com/salute-developers/GigaAM), [WhisperX и ограничения](https://github.com/m-bain/whisperX).
+[DeepFilterNet](https://github.com/Rikorose/DeepFilterNet), [ClearerVoice-Studio](https://github.com/modelscope/ClearerVoice-Studio), [Whisper](https://github.com/openai/whisper), [Scribe](https://elevenlabs.io/docs/overview/capabilities/speech-to-text), [GigaAM](https://github.com/salute-developers/GigaAM), [WhisperX and limitations](https://github.com/m-bain/whisperX).
 
-Для первого сравнения разумно взять Whisper и Scribe как независимые гипотезы, затем оценить пользу локального русского кандидата. Проверять лицензии конкретных весов и пригодность для выбранного режима развёртывания до включения в продукт. Стоимость и оборудование выбираются после измерения на тестовых роликах.
+For the first comparison it's reasonable to take Whisper and Scribe as independent hypotheses, then assess the value of a local Russian candidate. Check the licences of the specific weights and their fit for the chosen deployment mode before including them in the product. Cost and hardware are chosen after measuring on test clips.
 
-# Публикация и аудитория
+# Publishing and audience
 
-Предусмотреть два завершения сценария: прямая публикация через API и подготовленный экспорт для завершения публикации в родном приложении. При втором варианте сначала проверить поддержку передачи файла на устройстве; запасной путь - скачать видео и скопировать подпись. Передача в приложение не означает, что публикация состоялась.
+Provide two ways to finish the workflow: direct publishing via API and a prepared export for finishing the publication in the native app. For the second, first check that file handoff is supported on the device; the fallback is to download the video and copy the caption. Handing off to the app doesn't mean the publication happened.
 
-| Назначение | Путь | Выбор аудитории |
+| Destination | Path | Audience choice |
 | - | - | - |
-| Instagram Reels и публикации | API для профессионального аккаунта Business или Creator | Не обещать Close Friends через API; для ограниченной аудитории завершать в Instagram |
-| Instagram Stories | Отдельная проверка типа аккаунта и доступного API | В документации Facebook Login Stories ограничены Business; совместимость других путей подключения проверить до включения |
-| Facebook Page Reels | API публикации на Page | Публикация Page имеет публичную область видимости |
-| Личный Facebook-профиль | Экспорт и завершение в Facebook | Пользователь выбирает друзей, ограниченный список или другую доступную аудиторию в Facebook |
-| Telegram канал или группа | Bot API sendVideo с необходимыми правами | Аудитория выбранного канала или группы; закрытый канал выбирается отдельно |
-| Telegram Stories | Отдельный этап интеграции | Bot API postStory для управляемого business account; более гибкие privacy_rules доступны в MTProto stories.sendStory |
+| Instagram Reels and posts | API for a professional Business or Creator account | Don't promise Close Friends via the API; for a restricted audience finish in Instagram |
+| Instagram Stories | A separate check of the account type and available API | In the Facebook Login docs Stories are limited to Business; check other connection paths before enabling |
+| Facebook Page Reels | Page publishing API | Page publications are publicly visible |
+| Personal Facebook profile | Export and finish in Facebook | The user picks friends, a restricted list or another available audience in Facebook |
+| Telegram channel or group | Bot API sendVideo with the required rights | The audience of the chosen channel or group; a private channel is chosen separately |
+| Telegram Stories | A separate integration stage | Bot API postStory for a managed business account; more flexible privacy_rules are available in MTProto stories.sendStory |
 
-Для Telegram защита от пересылки через protect_content не заменяет выбор аудитории. В канале бот должен иметь право публиковать. Telegram Stories не следует смешивать с обычной отправкой видео в канал: это отдельный сценарий и авторизация.
+For Telegram, forwarding protection via protect_content doesn't replace audience choice. In a channel the bot must have the right to post. Telegram Stories should not be mixed with ordinary video posting to a channel: it's a separate workflow and authorisation.
 
-Экран перед отправкой показывает по каждой площадке аккаунт, формат, конкретную аудиторию, подпись, обложку и финальную версию видео. Если нужная аудитория недоступна, публикация блокируется либо переводится в ручное завершение. Молчаливый переход к публичной публикации запрещён.
+The pre-send screen shows, per platform, the account, format, exact audience, caption, cover and final video version. If the required audience is unavailable, publishing is blocked or switched to manual completion. Silently falling back to public publishing is forbidden.
 
-Для Meta нужны приложение, подходящий Login flow, разрешения и токены. Подключение сторонних клиентов требует соответствующего Advanced Access и App Review. Прототип для собственных аккаунтов и публичный сервис имеют разные требования. Не фиксировать обязательную связь с Facebook Page для всех способов входа Instagram: это зависит от выбранного API.
+Meta needs an app, a suitable Login flow, permissions and tokens. Connecting third-party clients requires the corresponding Advanced Access and App Review. A prototype for one's own accounts and a public service have different requirements. Don't hard-code a mandatory Facebook Page link for all Instagram login methods: it depends on the chosen API.
 
-Каждая площадка получает отдельное задание и состояние: подготовлено, загружается, обрабатывается, опубликовано, ошибка или завершение в приложении. Хранить идентификаторы удалённых объектов, сверять состояние после таймаута и не дублировать уже успешную публикацию при повторе. Ошибка одной площадки не откатывает успешную другую.
+Each platform gets a separate job and state: prepared, uploading, processing, published, error or finished in the app. Store remote object IDs, reconcile state after a timeout and don't duplicate an already successful publication on retry. An error on one platform doesn't roll back a successful one on another.
 
-Матрица основана на официальной документации, проверенной 24 октября 2026 года. Часть страниц Meta недоступна для полного чтения; сведения о scope и разрешениях дополнены индексированными фрагментами официальных документов. Stories для конкретного способа входа и Close Friends не считать подтверждёнными функциями до проверки подключённого аккаунта.
+The matrix is based on official documentation checked on 24 October 2026. Some Meta pages couldn't be read in full; scope and permission details were filled in from indexed fragments of official docs. Stories for a specific login method and Close Friends are not to be treated as confirmed features until checked on the connected account.
 
-# Архитектура Titler
+# Titler architecture
 
-Развиваем существующий Titler: Studio на Vite, React и TypeScript; сервер на Fastify и TypeScript; Remotion Player для превью; ffmpeg и ASS для рендера. В scripts/transcribe.py уже есть Whisper large-v3 через mlx-whisper и faster-whisper с таймингами слов, настройкой языка и initial prompt. Сохраняем эту основу и добавляем этап выбора обработанного аудио, независимые гипотезы распознавания и локальное уточнение таймингов.
+We develop the existing Titler: Studio on Vite, React and TypeScript; a server on Fastify and TypeScript; Remotion Player for preview; ffmpeg and ASS for rendering. scripts/transcribe.py already has Whisper large-v3 via mlx-whisper and faster-whisper with word timings, language setting and initial prompt. Keep this base and add a processed-audio selection step, independent recognition hypotheses and local timing refinement.
 
-В studio/src/components/TranscriptEditor.tsx уже есть переход к слову, inline-правка двойным щелчком, удаление при наведении и вставка через узкий промежуток между словами. Эти механики нужно переработать для touch и полноценной клавиатурной правки: явная панель действий, удобные зоны касания, вставка до и после слова, редактирование диапазонов и работа с волной звука. Дополнительные результаты ASR должны храниться отдельно от подтверждённого пользователем текста; текущее обновление transcript при завершении распознавания требует защиты ручных правок.
+studio/src/components/TranscriptEditor.tsx already has jump-to-word, inline editing by double click, delete on hover and insertion through a narrow gap between words. These mechanics need reworking for touch and full keyboard editing: an explicit action panel, comfortable touch targets, insert before and after a word, range editing and working with the waveform. Additional ASR results must be stored separately from user-confirmed text; the current transcript update when recognition finishes needs protection for manual edits.
 
-Каждый этап кэшируется по исходнику, параметрам и версии модели. Смена crop не пересчитывает голос; правка слова не очищает звук заново. Фоновое задание записывает версию результата, а интерфейс применяет её только к совместимой версии текста. Поздний ответ модели не должен перезаписывать свежую ручную правку.
+Each stage is cached by source, parameters and model version. Changing the crop doesn't recompute the voice; editing a word doesn't redo audio cleanup. A background job records the result version, and the interface applies it only to a compatible text version. A late model response must not overwrite a fresh manual edit.
 
-# Проверка качества и порядок разработки
+# Quality checks and development order
 
-Сначала собрать небольшой размеченный набор реальных записей с очков: спокойная речь, улица, ветер, транспорт, чужие голоса, русский, смешанная речь и английский. Разделить примеры для подбора параметров и независимой проверки. Без этого выбор «лучшей модели» будет предположением.
+First collect a small labelled set of real recordings from the glasses: calm speech, street, wind, traffic, other voices, Russian, mixed speech and English. Split examples into a tuning set and an independent test set. Without this, choosing "the best model" is a guess.
 
-Измерять разборчивость и естественность голоса при слепом сравнении, ошибки распознавания и отдельно ошибки имён и переключения языка, отклонения границ слов, время ручной доводки минуты ролика, задержку и стоимость обработки. Пользовательское предпочтение звука и точность ASR оценивать отдельно.
+Measure voice intelligibility and naturalness in a blind comparison, recognition errors and separately name and language-switch errors, word boundary deviations, manual finishing time per minute of clip, processing latency and cost. Evaluate user sound preference and ASR accuracy separately.
 
-Первый рабочий цикл: загрузка, исходник и два варианта очистки, сравнение, основной ASR, редактирование с клавиатуры, вставка слова с локальным выравниванием, 9:16 и экспорт. Следующий этап: второй ASR, согласование гипотез, словарь, режим проверки спорных мест, улучшенное кадрирование. Затем подключение публикации по подтверждённым возможностям аккаунтов.
+First working loop: upload, source and two cleanup variants, comparison, main ASR, keyboard editing, word insertion with local alignment, 9:16 and export. Next stage: second ASR, hypothesis reconciliation, dictionary, disputed-spot review mode, improved framing. Then connect publishing according to confirmed account capabilities.
 
-Критические проверки: слово из аудио добавляется без повреждения соседней фразы; слово, которого в аудио нет, не получает ложный статус точного выравнивания; правка переживает обновление страницы и повторный ASR; мобильная клавиатура не закрывает редактируемое место; удаление текста не режет видео; ни одна площадка не получает более широкую аудиторию из-за ошибки или повтора запроса.
+Critical checks: a word from the audio is added without damaging the neighbouring phrase; a word that isn't in the audio doesn't get a false exact-alignment status; an edit survives a page reload and an ASR re-run; the mobile keyboard doesn't cover the edited spot; deleting text doesn't cut the video; no platform gets a wider audience because of an error or a repeated request.

@@ -8,6 +8,7 @@ export (later: publish per platform). ~90% Russian, plus mixed Russian/Ukrainian
 
 - Target workflow (owner spec): [docs/spec-workflow.md](docs/spec-workflow.md)
 - Plan and architecture: [docs/PLAN-v2.md](docs/PLAN-v2.md), review of v1: [docs/review-codex.md](docs/review-codex.md)
+- Next stages: [docs/PLAN-v3.md](docs/PLAN-v3.md) (series, covers, public API), [docs/PLAN-v4.md](docs/PLAN-v4.md) (go public, faces, publishing), [docs/PLAN-faces.md](docs/PLAN-faces.md) (face anonymisation)
 - Worker protocol: [docs/worker-protocol.md](docs/worker-protocol.md)
 - Benchmarks (ASR, enhancement, alignment, AMD iGPU, cloud ASR): `bench/REPORT-*.md`
 - Running on n5: [docs/n5.md](docs/n5.md)
