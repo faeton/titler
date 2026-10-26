@@ -32,6 +32,7 @@ import { sendFile } from "./serve.js";
 import { Store, type ProjectRow } from "./store.js";
 import { completeUpload, createUpload, uploadState, writeChunk } from "./uploads.js";
 import { WorkerManager } from "./workers.js";
+import { PasskeyError, Passkeys } from "./passkeys.js";
 
 export interface App {
   fastify: FastifyInstance;
@@ -195,6 +196,7 @@ export const buildApp = async (opts: BuildOpts = {}): Promise<App> => {
   );
   const sched = new Scheduler(store, cfg.concurrency);
   const auth = new Auth(db, cfg.auth);
+  const passkeys = new Passkeys(db, auth, cfg.auth.publicOrigin);
   const ctx: Ctx = { cfg, store, sched, workers, log, auth };
   sched.onError = (job, err) => log.error({ job: job.id, kind: job.kind, err: err instanceof Error ? err.message : err }, "job failed");
   sched.register("ingest", (j) => ingest(ctx, j));
@@ -227,7 +229,9 @@ export const buildApp = async (opts: BuildOpts = {}): Promise<App> => {
     if (mustAuth) {
       const ip = auth.clientIp(req, gw);
       if (!limiter.take(`all:${ip}`, 1200)) return reply.code(429).send({ error: "too many requests" });
-      if (req.url.split("?")[0] === "/api/auth/login" && !limiter.take(`login:${ip}`, 10)) return reply.code(429).send({ error: "too many login attempts" });
+      const path = req.url.split("?")[0]!;
+      const isLogin = path === "/api/auth/login" || path.startsWith("/api/auth/passkey/login/");
+      if (isLogin && !limiter.take(`login:${ip}`, 10)) return reply.code(429).send({ error: "too many login attempts" });
     }
     const who = auth.identify(req);
     access.set(req, { gateway: gw, mustAuth, who });
@@ -256,6 +260,36 @@ export const buildApp = async (opts: BuildOpts = {}): Promise<App> => {
     const a = accessOf(req);
     return { required: a.mustAuth, authenticated: !a.mustAuth || !!a.who, via: a.who?.via ?? (a.mustAuth ? null : "local"), name: a.who?.key.name ?? null };
   });
+  // Passkeys (passkeys.ts): status is public (the login screen asks), registration is owner-only.
+  const passkey = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (e) {
+      if (e instanceof PasskeyError) throw new HttpError(e.status, e.message);
+      throw e;
+    }
+  };
+  fastify.get("/api/auth/passkey", async () => passkeys.status);
+  fastify.post("/api/auth/passkey/register/options", async (req) => {
+    requireOwner(req);
+    return passkey(() => passkeys.registrationOptions());
+  });
+  fastify.post("/api/auth/passkey/register/verify", async (req) => {
+    requireOwner(req);
+    const body = (req.body ?? {}) as { name?: unknown; response?: unknown };
+    const name = typeof body.name === "string" && body.name.trim() ? body.name.trim().slice(0, 80) : "Passkey";
+    if (!body.response || typeof body.response !== "object") throw new HttpError(400, "response");
+    return passkey(() => passkeys.register(name, body.response as Parameters<Passkeys["register"]>[1]));
+  });
+  fastify.post("/api/auth/passkey/login/options", async () => passkey(() => passkeys.loginOptions()));
+  fastify.post("/api/auth/passkey/login/verify", async (req, reply) => {
+    const response = (req.body as { response?: unknown } | null)?.response;
+    if (!response || typeof response !== "object") throw new HttpError(400, "response");
+    const s = await passkey(() => passkeys.login(response as Parameters<Passkeys["login"]>[0]));
+    reply.header("Set-Cookie", sessionCookie(s.cookie, cfg.auth.sessionDays * 86_400, isHttps(req, accessOf(req).gateway)));
+    return { ok: true, expiresAt: s.expiresAt, name: s.key.name };
+  });
+
   fastify.get("/api/auth/keys", async (req) => {
     requireOwner(req);
     return auth.listKeys();

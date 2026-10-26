@@ -31,10 +31,10 @@ const waitFor = async (fn: () => boolean, ms = 5000) => {
 describe("db", () => {
   it("migrates once and records user_version", () => {
     const { db } = setup();
-    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(2);
-    expect(migrate(db)).toBe(2); // idempotent
+    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(3);
+    expect(migrate(db)).toBe(3); // idempotent
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[]).map((r) => r.name);
-    expect(tables).toEqual(["artifacts", "auth_keys", "hypotheses", "jobs", "projects", "sessions", "settings_kv", "transcript_revs", "uploads"]);
+    expect(tables).toEqual(["artifacts", "auth_keys", "hypotheses", "jobs", "passkeys", "projects", "sessions", "settings_kv", "transcript_revs", "uploads"]);
   });
 
   it("revisions are append-only and bump the project pointer", () => {

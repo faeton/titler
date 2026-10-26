@@ -345,6 +345,9 @@ const finish = (p: MockProject, j: MockProject["jobs"][number]) => {
 };
 
 const mockKeys: AuthKey[] = [];
+const passkeysOff = (): never => {
+  throw new ApiError(400, { error: "passkeys are off: mock API" });
+};
 const mockLinks: LinkStats = { issued: 3, rotatedAt: null, lastExpiresAt: new Date(Date.now() + 3_600_000).toISOString() };
 
 const placeholder = (label: string, w: number, h: number) =>
@@ -577,6 +580,11 @@ export const mockApi: Api = {
       k.revokedAt = now();
       return k;
     }),
+  passkeyStatus: () => respond(() => ({ enabled: false, reason: "mock API" })),
+  passkeyRegisterOptions: () => respond(passkeysOff),
+  passkeyRegister: () => respond(passkeysOff),
+  passkeyLoginOptions: () => respond(passkeysOff),
+  passkeyLogin: () => respond(passkeysOff),
   linkStats: () => respond(() => ({ ...mockLinks })),
   rotateLinks: () => respond(() => Object.assign(mockLinks, { issued: 0, rotatedAt: now(), lastExpiresAt: null })),
   cancelJob: (jobId) =>

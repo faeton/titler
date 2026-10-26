@@ -14,6 +14,8 @@ export interface AuthSettings {
   gatewaySecret: string | null;
   corsOrigins: string[];
   sessionDays: number;
+  /** The public https origin (behind the gateway); passkeys use it as RP ID / origin. null = passkeys off. */
+  publicOrigin?: string | null;
 }
 
 export interface Config {
@@ -125,6 +127,7 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env, overrides: Part
       gatewaySecret: env.TITLER_GATEWAY_SECRET || null,
       corsOrigins: (env.TITLER_CORS_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
       sessionDays: Number(env.TITLER_SESSION_DAYS ?? 30),
+      publicOrigin: env.TITLER_PUBLIC_ORIGIN?.trim().replace(/\/+$/, "") || null,
     },
   };
   return { ...cfg, ...overrides };

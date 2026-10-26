@@ -12,6 +12,7 @@ import { newId, now } from "./store.js";
 // open, unless TITLER_AUTH=all. Credentials:
 //   - owner token  → POST /api/auth/login → session cookie (HttpOnly; Secure over HTTPS)
 //   - device keys  → Authorization: Bearer tk_…  (named, hashed, revocable)
+//   - passkeys     → WebAuthn (passkeys.ts) → the same session cookie
 //   - signed links → /s/<token> for one artifact file until it expires
 //                    (Instagram / AudioShake / Modal fetch media by URL);
 //                    rotating the signing secret invalidates all of them at once
@@ -24,11 +25,13 @@ export interface AuthConfig {
   gatewaySecret: string | null;
   corsOrigins: string[];
   sessionDays: number;
+  publicOrigin?: string | null;
 }
 
 export interface KeyRow {
   id: string;
-  kind: "owner" | "device";
+  /** owner: token that logs in; device: Bearer key; passkey: a WebAuthn credential's identity. */
+  kind: "owner" | "device" | "passkey";
   name: string;
   createdAt: string;
   lastUsedAt: string | null;
@@ -91,7 +94,8 @@ export class Auth {
   // ---- keys ----
   /** New owner token or device key; the secret is returned once and only its hash is stored. */
   createKey(kind: KeyRow["kind"], name: string): { key: KeyRow; secret: string } {
-    const secret = `${kind === "owner" ? "to" : "tk"}_${randomBytes(24).toString("base64url")}`;
+    // A passkey's row gets a random secret too (the hash column is unique), but it is never shown.
+    const secret = `${{ owner: "to", device: "tk", passkey: "pk" }[kind]}_${randomBytes(24).toString("base64url")}`;
     const id = newId();
     this.db.prepare("INSERT INTO auth_keys (id, kind, name, hash, created_at) VALUES (?,?,?,?,?)").run(id, kind, name, hashSecret(secret), now());
     return { key: this.getKey(id)!, secret };
@@ -123,7 +127,11 @@ export class Auth {
   // ---- sessions ----
   login(ownerToken: string): { cookie: string; expiresAt: string; key: KeyRow } | null {
     const key = this.findActive(ownerToken, "owner");
-    if (!key) return null;
+    return key ? this.startSession(key) : null;
+  }
+
+  /** A session for an already verified key (owner token or passkey). */
+  startSession(key: KeyRow): { cookie: string; expiresAt: string; key: KeyRow } {
     const cookie = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + this.cfg.sessionDays * 86_400_000).toISOString();
     this.db.prepare("INSERT INTO sessions (hash, key_id, created_at, expires_at) VALUES (?,?,?,?)").run(hashSecret(cookie), key.id, now(), expiresAt);
@@ -266,6 +274,7 @@ export class RateLimiter {
 export const isPublicPath = (method: string, url: string): boolean => {
   const path = url.split("?")[0]!;
   if (path === "/api/health" || path === "/api/auth/login" || path === "/api/auth/me" || path === "/api/auth/logout") return true;
+  if (path === "/api/auth/passkey" || path.startsWith("/api/auth/passkey/login/")) return true;
   if (path.startsWith("/s/")) return true;
   if (path.startsWith("/api/fonts/")) return true;
   // The SPA shell and its assets (the app shows the login screen itself).

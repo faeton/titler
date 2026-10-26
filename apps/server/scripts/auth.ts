@@ -19,7 +19,7 @@ if (cmd === "owner" || cmd === "device") {
   const { key, secret } = auth.createKey(cmd, arg ?? "owner");
   console.log(`${key.kind} key ${key.id} "${key.name}"\n${secret}\n(shown once — store it now)`);
 } else if (cmd === "list") {
-  for (const k of auth.listKeys()) console.log(`${k.id}  ${k.kind.padEnd(6)}  ${k.name.padEnd(24)}  created ${k.createdAt}  used ${k.lastUsedAt ?? "-"}${k.revokedAt ? `  REVOKED ${k.revokedAt}` : ""}`);
+  for (const k of auth.listKeys()) console.log(`${k.id}  ${k.kind.padEnd(7)}  ${k.name.padEnd(24)}  created ${k.createdAt}  used ${k.lastUsedAt ?? "-"}${k.revokedAt ? `  REVOKED ${k.revokedAt}` : ""}`);
 } else if (cmd === "revoke" && arg) {
   console.log(auth.revokeKey(arg) ? `revoked ${arg}` : `no active key ${arg}`);
 } else {
