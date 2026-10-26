@@ -97,6 +97,18 @@ const MIGRATIONS: string[] = [
     v TEXT NOT NULL
   );
   `,
+  `
+  -- WebAuthn passkeys. Each has its own auth_keys row (kind 'passkey'): sessions point at it,
+  -- and revoking that row disables the passkey and ends its sessions.
+  CREATE TABLE passkeys (
+    cred_id TEXT PRIMARY KEY,      -- credential ID, base64url
+    key_id TEXT NOT NULL UNIQUE REFERENCES auth_keys(id) ON DELETE CASCADE,
+    public_key TEXT NOT NULL,      -- COSE public key, base64url
+    counter INTEGER NOT NULL DEFAULT 0,
+    transports TEXT,               -- JSON array, as reported at registration
+    created_at TEXT NOT NULL
+  );
+  `,
 ];
 
 export type Db = DatabaseSync;

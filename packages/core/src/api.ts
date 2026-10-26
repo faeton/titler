@@ -207,8 +207,15 @@ export interface ProviderInfo {
 // POST   /api/auth/logout             → { ok }
 // GET    /api/auth/keys               → AuthKey[]          (local / owner session only)
 // POST   /api/auth/keys               { name } → AuthKey & { secret }  (secret shown once)
-// DELETE /api/auth/keys/:id           → AuthKey (revoked)
+// DELETE /api/auth/keys/:id           → AuthKey (revoked; also how a passkey is removed)
+// GET    /api/auth/passkey            → PasskeyStatus      (public: the login screen asks)
+// POST   /api/auth/passkey/register/options → WebAuthn creation options (local / owner session only)
+// POST   /api/auth/passkey/register/verify  { name, response } → AuthKey (kind "passkey")
+// POST   /api/auth/passkey/login/options    → WebAuthn request options (public, rate limited)
+// POST   /api/auth/passkey/login/verify     { response } → { ok, expiresAt, name }  (sets the session cookie)
 // POST   /api/artifacts/:key/sign     { file?, ttlSec? (60..604800, default 3600) } → SignedLink
+// GET    /api/auth/links              → LinkStats          (local / owner session only)
+// POST   /api/auth/links/rotate       → LinkStats  (new signing secret: every signed link stops working)
 // GET    /s/<token>[/<name>]          the signed file, no credentials (Range supported)
 
 export interface AuthMe {
@@ -221,14 +228,30 @@ export interface AuthMe {
 
 export interface AuthKey {
   id: string;
-  kind: "owner" | "device";
+  kind: "owner" | "device" | "passkey";
   name: string;
   createdAt: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
 }
 
+/** Passkeys work only on the public origin (TITLER_PUBLIC_ORIGIN); off when it isn't set. */
+export interface PasskeyStatus {
+  enabled: boolean;
+  reason?: string;
+  origin?: string;
+  rpId?: string;
+}
+
 export interface SignedLink {
   url: string;
   expiresAt: string;
+}
+
+/** Signed links issued since the signing secret was last rotated (counters only, no per-link rows). */
+export interface LinkStats {
+  issued: number;
+  rotatedAt: string | null;
+  /** Latest expiry among them; once past, no signed link is valid anyway. */
+  lastExpiresAt: string | null;
 }

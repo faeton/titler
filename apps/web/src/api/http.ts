@@ -58,4 +58,13 @@ export const httpApi: Api = {
   listKeys: () => req("GET", "/auth/keys"),
   createKey: (name) => req("POST", "/auth/keys", { name }),
   revokeKey: (id) => req("DELETE", `/auth/keys/${enc(id)}`),
+  passkeyStatus: () => req("GET", "/auth/passkey"),
+  passkeyRegisterOptions: () => req("POST", "/auth/passkey/register/options", {}),
+  passkeyRegister: (name, response) => req("POST", "/auth/passkey/register/verify", { name, response }),
+  passkeyLoginOptions: () => req("POST", "/auth/passkey/login/options", {}),
+  passkeyLogin: async (response) => {
+    await req("POST", "/auth/passkey/login/verify", { response });
+  },
+  linkStats: () => req("GET", "/auth/links"),
+  rotateLinks: () => req("POST", "/auth/links/rotate", {}),
 };

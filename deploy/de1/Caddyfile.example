@@ -12,6 +12,8 @@
 #
 # The server then asks every request that carries the secret header to log in
 # (owner session or device key); /s/<token> signed links and /api/health stay public.
+# For passkey login also set TITLER_PUBLIC_ORIGIN=https://<TITLER_PUBLIC_HOST> on the
+# server: it is the WebAuthn RP ID / origin (unset = token login only).
 
 {$TITLER_PUBLIC_HOST} {
 	encode zstd gzip

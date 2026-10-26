@@ -13,7 +13,7 @@ import re
 import time
 import zlib
 
-from .common import THREADS, ms, read_wav, scratch
+from .common import THREADS, download_heartbeat, ms, read_wav, scratch
 from .protocol import WorkerError, log, need_file
 
 FW_DEFAULT = os.environ.get("TITLER_FW_MODEL", "large-v3-turbo")
@@ -304,8 +304,10 @@ def op_asr(req, progress):
     t = time.perf_counter()
     if (provider, model) not in _MODELS:
         progress(0.0, "loading model")
-        (_fw(model) if provider == "faster-whisper" else _mlx(model) if provider == "mlx-whisper"
-         else _onnx(provider, model))
+        with download_heartbeat(progress, roots=(ONNX_LOCAL,)):
+            (_fw(model) if provider == "faster-whisper" else _mlx(model) if provider == "mlx-whisper"
+             else _onnx(provider, model))
+        progress(0.0, "model loaded")  # ends the server watchdog's load phase
     load_ms = ms(time.perf_counter() - t)
 
     t = time.perf_counter()

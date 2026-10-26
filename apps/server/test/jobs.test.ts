@@ -4,6 +4,7 @@ import { migrate, openDb } from "../src/db.js";
 import { Scheduler } from "../src/jobs.js";
 import { Store } from "../src/store.js";
 import { Worker } from "../src/workers.js";
+import { existsSync } from "node:fs";
 import { FAKE_WORKER, rmDir, tmpDir } from "./helpers.js";
 
 const dirs: string[] = [];
@@ -30,10 +31,10 @@ const waitFor = async (fn: () => boolean, ms = 5000) => {
 describe("db", () => {
   it("migrates once and records user_version", () => {
     const { db } = setup();
-    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(2);
-    expect(migrate(db)).toBe(2); // idempotent
+    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(3);
+    expect(migrate(db)).toBe(3); // idempotent
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[]).map((r) => r.name);
-    expect(tables).toEqual(["artifacts", "auth_keys", "hypotheses", "jobs", "projects", "sessions", "settings_kv", "transcript_revs", "uploads"]);
+    expect(tables).toEqual(["artifacts", "auth_keys", "hypotheses", "jobs", "passkeys", "projects", "sessions", "settings_kv", "transcript_revs", "uploads"]);
   });
 
   it("revisions are append-only and bump the project pointer", () => {
@@ -196,6 +197,70 @@ describe("worker manager", () => {
     setTimeout(() => ac.abort(), 200);
     await expect(pending).rejects.toThrow(/cancelled/);
     expect(await w.request("ping")).toMatchObject({ role: "asr" });
+    w.kill();
+  });
+
+  const logged = () => {
+    const lines: { o: Record<string, unknown>; msg?: string }[] = [];
+    const push = (o: unknown, msg?: string) => void lines.push({ o: o as Record<string, unknown>, msg });
+    return { lines, log: { info: push, warn: push } };
+  };
+
+  it("watchdog: a silent model load gets SIGUSR1, its stack is logged, the worker restarts once", async () => {
+    const dir = tmpDir();
+    dirs.push(dir);
+    const once = join(dir, "hung-once");
+    const { lines, log } = logged();
+    const w = new Worker({ ...spec({ FAKE_HANG_ONCE: once }), loadSilenceMs: 300, dumpWaitMs: 500, log });
+    await w.request("ping");
+    const pid1 = w.pid;
+    expect(await w.request("load", { ms: 5000 })).toEqual({ loaded: true });
+    expect(existsSync(once)).toBe(true);
+    expect(w.pid).not.toBe(pid1);
+    const dump = lines.find((l) => l.msg === "worker hang: stack dump");
+    expect(dump?.o).toMatchObject({ role: "asr", phase: "load" });
+    expect(String(dump?.o.stack)).toMatch(/File "fake.py", line 7 in asr_load/);
+    expect(lines.some((l) => l.msg === "worker hung, restarting it once")).toBe(true);
+    w.kill();
+  });
+
+  it("watchdog: a second hang fails the request with a clear error; requests without load are not watched", async () => {
+    const w = new Worker({ ...spec(), loadSilenceMs: 300, dumpWaitMs: 500 });
+    // a long request with no "loading" line is fine: silenceMs is off by default
+    expect(await w.request("sleep", { ms: 500 })).toEqual({ slept: 500 });
+    await expect(w.request("load", { ms: 5000 })).rejects.toThrow(
+      /asr worker hung twice while loading a model \(op load\).*innermost frame: File "fake.py", line 7 in asr_load/,
+    );
+    // the next request gets a fresh process
+    expect(await w.request("ping")).toMatchObject({ role: "asr" });
+    w.kill();
+  });
+
+  it("watchdog: a worker that answers during the stack-dump wait is slow, not hung", async () => {
+    const { lines, log } = logged();
+    // the load finishes ~100 ms after the watchdog fires, inside the ~250 ms dump wait
+    const w = new Worker({ ...spec(), loadSilenceMs: 300, dumpWaitMs: 1000, log });
+    await w.request("ping");
+    const pid1 = w.pid;
+    expect(await w.request("load", { ms: 400 })).toEqual({ loaded: true });
+    // the next request starts on the same process while hang() is still waiting, and survives it
+    expect(await w.request("sleep", { ms: 400 })).toEqual({ slept: 400 });
+    expect(w.pid).toBe(pid1);
+    expect(lines.some((l) => l.msg === "worker answered during the stack dump, not killing it")).toBe(true);
+    expect(lines.some((l) => l.msg === "worker kill")).toBe(false);
+    w.kill();
+  });
+
+  it("watchdog: a worker that never becomes ready is dumped, retried once, then fails", async () => {
+    const { lines, log } = logged();
+    const w = new Worker({ ...spec({ FAKE_HANG_START: "1" }), startTimeoutMs: 300, dumpWaitMs: 500, log });
+    await expect(w.request("ping")).rejects.toThrow(/asr worker hung twice while starting/);
+    expect(lines.filter((l) => l.msg === "worker hang: stack dump")).toHaveLength(2);
+  });
+
+  it("watchdog: silenceMs covers any request phase", async () => {
+    const w = new Worker({ ...spec(), silenceMs: 300, dumpWaitMs: 300 });
+    await expect(w.request("sleep", { ms: 5000 })).rejects.toThrow(/hung twice while running a request/);
     w.kill();
   });
 });

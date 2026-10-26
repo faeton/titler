@@ -4,6 +4,8 @@ import type {
   CoverSuggestions,
   CreateUploadReq,
   Job,
+  LinkStats,
+  PasskeyStatus,
   PatchProjectReq,
   ProjectSummary,
   ProjectView,
@@ -17,6 +19,12 @@ import type {
   TranscriptRevision,
   UploadState,
 } from "@titler/core";
+import type {
+  AuthenticationResponseJSON,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
+} from "@simplewebauthn/browser";
 
 /** Everything the web app needs from /api (see packages/core/src/api.ts). */
 export interface Api {
@@ -51,6 +59,13 @@ export interface Api {
   listKeys(): Promise<AuthKey[]>;
   createKey(name: string): Promise<AuthKey & { secret: string }>;
   revokeKey(id: string): Promise<AuthKey>;
+  passkeyStatus(): Promise<PasskeyStatus>;
+  passkeyRegisterOptions(): Promise<PublicKeyCredentialCreationOptionsJSON>;
+  passkeyRegister(name: string, response: RegistrationResponseJSON): Promise<AuthKey>;
+  passkeyLoginOptions(): Promise<PublicKeyCredentialRequestOptionsJSON>;
+  passkeyLogin(response: AuthenticationResponseJSON): Promise<void>;
+  linkStats(): Promise<LinkStats>;
+  rotateLinks(): Promise<LinkStats>;
 }
 
 /** Fired on window when the server answers 401 "login required". */

@@ -1111,7 +1111,8 @@ input.text {
 .login {
   max-width: 420px;
 }
-.secret {
+.secret,
+.confirm {
   display: grid;
   gap: 8px;
 }

@@ -91,6 +91,8 @@ export interface PartPlan {
   total: number;
   startMs: number;
   endMs: number;
+  /** Overlap repeated from the previous part (the badge starts after it). */
+  leadMs: number;
 }
 
 export interface PartResult extends PartPlan {
@@ -114,7 +116,7 @@ export const render = async (ctx: Ctx, j: JobContext): Promise<Record<string, un
   const D = probe.durationMs;
 
   // Parts: the whole clip, or the series plan for the chosen destination.
-  let parts: PartPlan[] = [{ index: 0, total: 1, startMs: 0, endMs: D }];
+  let parts: PartPlan[] = [{ index: 0, total: 1, startMs: 0, endMs: D, leadMs: 0 }];
   let maxMs: number | null = null;
   let manual = false;
   if (req.series) {
@@ -147,7 +149,7 @@ export const render = async (ctx: Ctx, j: JobContext): Promise<Record<string, un
     const label = isSeries ? `part ${part.index + 1}/${part.total}` : "";
     const progress = (f: number, m?: string) => j.progress(0.05 + (0.93 * (part.index + f)) / parts.length, m ? [label, m].filter(Boolean).join(" · ") : undefined);
     const cues: Cue[] = !transcript ? [] : isSeries ? compilePartCues(transcript.doc, style, D, part) : compileCues(transcript.doc, style, D);
-    const badge: Badge | null = isSeries ? seriesBadge(series.numbering, part.index, part.total, len) : null;
+    const badge: Badge | null = isSeries ? seriesBadge(series.numbering, part.index, part.total, len, part.leadMs) : null;
     const cuesHash = sha256(canonical(cues));
     // Undefined keys drop out of the canonical params, so whole-clip keys match pre-series renders.
     const partKey = isSeries ? { startMs: part.startMs, endMs: part.endMs, index: part.index, total: part.total } : undefined;
