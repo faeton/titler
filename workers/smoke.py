@@ -51,6 +51,7 @@ class Worker:
         t = time.perf_counter()
         self.p = subprocess.Popen(cmd, cwd=REPO, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=self.err, text=True, bufsize=1)
+        self._buf = b""
         self.next_id = 0
         ready = self._read(120)
         self.ready_s = time.perf_counter() - t
@@ -59,17 +60,25 @@ class Worker:
         print(f"  {role}: ready in {self.ready_s:.1f}s pid={ready.get('pid')} ({' '.join(cmd[:1])})", flush=True)
 
     def _read(self, timeout):
-        r, _, _ = select.select([self.p.stdout], [], [], timeout)
-        if not r:
-            # the worker registers faulthandler on SIGUSR1: get its stack into the stderr log
-            if hasattr(signal, "SIGUSR1") and self.p.poll() is None:
-                self.p.send_signal(signal.SIGUSR1)
-                time.sleep(1)
-            raise TimeoutError(f"{self.role}: no output in {timeout}s (stack dump in {self.err.name})")
-        line = self.p.stdout.readline()
-        if not line:
-            raise RuntimeError(f"{self.role}: worker exited (rc={self.p.poll()}), see stderr log")
-        return json.loads(line)
+        # Own line buffer over the raw fd: select() on a buffered pipe misses lines that a
+        # previous readline() already pulled into Python's buffer (two lines arriving in one
+        # chunk, e.g. the last progress and the result) and then waits for the timeout.
+        fd = self.p.stdout.fileno()
+        deadline = time.monotonic() + timeout
+        while b"\n" not in self._buf:
+            r, _, _ = select.select([fd], [], [], max(0.0, deadline - time.monotonic()))
+            if not r:
+                # the worker registers faulthandler on SIGUSR1: get its stack into the stderr log
+                if hasattr(signal, "SIGUSR1") and self.p.poll() is None:
+                    self.p.send_signal(signal.SIGUSR1)
+                    time.sleep(1)
+                raise TimeoutError(f"{self.role}: no output in {timeout}s (stack dump in {self.err.name})")
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                raise RuntimeError(f"{self.role}: worker exited (rc={self.p.poll()}), see stderr log")
+            self._buf += chunk
+        line, self._buf = self._buf.split(b"\n", 1)
+        return json.loads(line.decode("utf-8"))
 
     def call(self, op, timeout=None, **params):
         timeout = timeout or float(os.environ.get("TITLER_SMOKE_TIMEOUT", 900))
