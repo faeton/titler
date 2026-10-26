@@ -43,3 +43,4 @@ bench/refs/
 # deep-research scratch (reports are copied into bench/ when kept)
 /research_notes/
 /reports/
+/.claude/worktrees/
