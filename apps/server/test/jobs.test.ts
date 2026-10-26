@@ -236,6 +236,21 @@ describe("worker manager", () => {
     w.kill();
   });
 
+  it("watchdog: a worker that answers during the stack-dump wait is slow, not hung", async () => {
+    const { lines, log } = logged();
+    // the load finishes ~100 ms after the watchdog fires, inside the ~250 ms dump wait
+    const w = new Worker({ ...spec(), loadSilenceMs: 300, dumpWaitMs: 1000, log });
+    await w.request("ping");
+    const pid1 = w.pid;
+    expect(await w.request("load", { ms: 400 })).toEqual({ loaded: true });
+    // the next request starts on the same process while hang() is still waiting, and survives it
+    expect(await w.request("sleep", { ms: 400 })).toEqual({ slept: 400 });
+    expect(w.pid).toBe(pid1);
+    expect(lines.some((l) => l.msg === "worker answered during the stack dump, not killing it")).toBe(true);
+    expect(lines.some((l) => l.msg === "worker kill")).toBe(false);
+    w.kill();
+  });
+
   it("watchdog: a worker that never becomes ready is dumped, retried once, then fails", async () => {
     const { lines, log } = logged();
     const w = new Worker({ ...spec({ FAKE_HANG_START: "1" }), startTimeoutMs: 300, dumpWaitMs: 500, log });

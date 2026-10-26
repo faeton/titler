@@ -25,6 +25,16 @@ type HangPhase = "start" | "load" | "request";
 const PHASE_TEXT: Record<HangPhase, string> = { start: "starting", load: "loading a model", request: "running a request" };
 
 /** The worker went silent past the watchdog limit (its stack dump is in `dump` and the log). */
+/** Signal the worker's process group (its ffmpeg / deep-filter children too), else just the worker. */
+const signalGroup = (proc: ChildProcessWithoutNullStreams, sig: NodeJS.Signals): void => {
+  try {
+    if (proc.pid && process.platform !== "win32") process.kill(-proc.pid, sig);
+    else proc.kill(sig);
+  } catch {
+    proc.kill(sig);
+  }
+};
+
 export class WorkerHangError extends WorkerError {
   constructor(
     message: string,
@@ -190,6 +200,8 @@ export class Worker {
       cwd: this.spec.cwd,
       env: { ...process.env, PYTHONUNBUFFERED: "1", ...this.spec.env },
       stdio: ["pipe", "pipe", "pipe"],
+      // Own process group, so kill() also reaches ffmpeg / deep-filter children (see kill()).
+      detached: process.platform !== "win32",
     });
     this.proc = proc;
     this.stderrTail = "";
@@ -197,6 +209,9 @@ export class Worker {
 
     return new Promise<void>((resolve, reject) => {
       let isReady = false;
+      // Every stdout line bumps this; hang() compares it after the dump wait, so a worker
+      // that answered in the meantime (ready, result, progress) isn't killed.
+      let lines = 0;
       const loadMs = this.spec.loadSilenceMs ?? 120_000;
       const limits: Record<HangPhase, number> = {
         start: this.spec.startTimeoutMs ?? loadMs,
@@ -210,7 +225,10 @@ export class Worker {
         if (this.proc !== proc) return;
         const phase: HangPhase | null = !isReady ? "start" : this.pending ? (this.pending.loading ? "load" : "request") : null;
         if (!phase || !limits[phase]) return;
-        watchdog = setTimeout(() => void this.hang(proc, phase, limits[phase], isReady ? undefined : reject), limits[phase]);
+        watchdog = setTimeout(() => {
+          const seen = lines;
+          void this.hang(proc, phase, limits[phase], () => lines !== seen, isReady ? undefined : reject);
+        }, limits[phase]);
       };
       this.rearm = arm;
       arm();
@@ -220,6 +238,7 @@ export class Worker {
       });
       const rl = createInterface({ input: proc.stdout });
       rl.on("line", (line) => {
+        lines++;
         let msg: Record<string, unknown>;
         try {
           msg = JSON.parse(line) as Record<string, unknown>;
@@ -263,7 +282,13 @@ export class Worker {
   }
 
   /** Watchdog fired: SIGUSR1 for a stack dump, log it, kill, fail the request (or the start). */
-  private async hang(proc: ChildProcessWithoutNullStreams, phase: HangPhase, silentMs: number, rejectStart?: (e: Error) => void): Promise<void> {
+  private async hang(
+    proc: ChildProcessWithoutNullStreams,
+    phase: HangPhase,
+    silentMs: number,
+    answered: () => boolean,
+    rejectStart?: (e: Error) => void,
+  ): Promise<void> {
     if (this.proc !== proc) return;
     const { role } = this.spec;
     this.log.warn({ role, pid: proc.pid, phase, silentMs }, "worker silent, asking for a stack dump (SIGUSR1)");
@@ -288,7 +313,18 @@ export class Worker {
     dump = dump.slice(-16_000);
     this.log.warn({ role, pid: proc.pid, phase, stack: dump || "(no dump: the worker did not answer SIGUSR1)" }, "worker hang: stack dump");
     if (this.proc !== proc) return; // exited or was killed while we waited
-    const err = new WorkerHangError(`${role} worker silent for ${silentMs} ms while ${PHASE_TEXT[phase]}`, phase, dump);
+    if (answered()) {
+      // It spoke during the dump wait: slow, not hung. The current request (maybe a new one) keeps going.
+      this.log.warn({ role, pid: proc.pid, phase }, "worker answered during the stack dump, not killing it");
+      this.rearm();
+      return;
+    }
+    const err = new WorkerHangError(
+      `${role} worker silent for ${silentMs} ms while ${PHASE_TEXT[phase]}` +
+        (phase === "request" ? "" : " (raise TITLER_WORKER_LOAD_SILENCE_MS if loads are just slow here)"),
+      phase,
+      dump,
+    );
     const p = this.pending;
     this.pending = null;
     this.kill(`hang while ${PHASE_TEXT[phase]}`);
@@ -318,9 +354,9 @@ export class Worker {
     const p = this.pending;
     this.pending = null;
     p?.reject(new WorkerError(`${this.spec.role} worker killed: ${reason}`));
-    proc.kill("SIGTERM");
+    signalGroup(proc, "SIGTERM");
     setTimeout(() => {
-      if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
+      if (proc.exitCode === null && proc.signalCode === null) signalGroup(proc, "SIGKILL");
     }, 3000).unref();
   }
 }

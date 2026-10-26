@@ -10,7 +10,7 @@ import {
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import type { Auth, KeyRow } from "./auth.js";
-import type { Db } from "./db.js";
+import { tx, type Db } from "./db.js";
 import { now } from "./store.js";
 
 // Passkey (WebAuthn) login for the owner, beside the owner token (which stays the fallback).
@@ -71,7 +71,9 @@ export class Passkeys {
   private issue(purpose: "register" | "login", challenge: string): void {
     const t = Date.now();
     for (const [c, v] of this.challenges) if (v.expires < t) this.challenges.delete(c);
-    if (this.challenges.size > 1000) this.challenges.clear(); // bounded: options are cheap to ask for again
+    // Bounded: drop the oldest (Map keeps insertion order), never the whole set, so a burst of
+    // anonymous login options can't wipe the owner's in-flight challenge.
+    while (this.challenges.size >= 1000) this.challenges.delete(this.challenges.keys().next().value!);
     this.challenges.set(challenge, { purpose, expires: t + CHALLENGE_TTL_MS });
   }
 
@@ -108,7 +110,7 @@ export class Passkeys {
       userID: this.userId(),
       attestationType: "none",
       excludeCredentials: this.active().map((c) => ({ id: c.cred_id, transports: c.transports ? (JSON.parse(c.transports) as string[]) : undefined })),
-      authenticatorSelection: { residentKey: "required", userVerification: "preferred" },
+      authenticatorSelection: { residentKey: "required", userVerification: "required" },
     });
     this.issue("register", opts.challenge);
     return opts;
@@ -123,7 +125,7 @@ export class Passkeys {
         expectedChallenge: (c) => this.consume("register", c),
         expectedOrigin: rp.origin,
         expectedRPID: rp.id,
-        requireUserVerification: false,
+        requireUserVerification: true,
       });
     } catch (e) {
       throw new PasskeyError(400, `passkey not accepted: ${e instanceof Error ? e.message : String(e)}`);
@@ -131,18 +133,20 @@ export class Passkeys {
     if (!v.verified) throw new PasskeyError(400, "passkey not accepted");
     const { credential } = v.registrationInfo;
     if (this.db.prepare("SELECT 1 FROM passkeys WHERE cred_id = ?").get(credential.id)) throw new PasskeyError(409, "this passkey is already registered");
-    const { key } = this.auth.createKey("passkey", name);
-    this.db
-      .prepare("INSERT INTO passkeys (cred_id, key_id, public_key, counter, transports, created_at) VALUES (?,?,?,?,?,?)")
-      .run(credential.id, key.id, Buffer.from(credential.publicKey).toString("base64url"), credential.counter, credential.transports ? JSON.stringify(credential.transports) : null, now());
-    return key;
+    return tx(this.db, () => {
+      const { key } = this.auth.createKey("passkey", name);
+      this.db
+        .prepare("INSERT INTO passkeys (cred_id, key_id, public_key, counter, transports, created_at) VALUES (?,?,?,?,?,?)")
+        .run(credential.id, key.id, Buffer.from(credential.publicKey).toString("base64url"), credential.counter, credential.transports ? JSON.stringify(credential.transports) : null, now());
+      return key;
+    });
   }
 
   // ---- login ----
   async loginOptions(): Promise<PublicKeyCredentialRequestOptionsJSON> {
     const rp = this.need();
     // No allowCredentials: discoverable credentials, the browser offers the owner's passkeys.
-    const opts = await generateAuthenticationOptions({ rpID: rp.id, userVerification: "preferred" });
+    const opts = await generateAuthenticationOptions({ rpID: rp.id, userVerification: "required" });
     this.issue("login", opts.challenge);
     return opts;
   }
@@ -167,7 +171,7 @@ export class Passkeys {
           counter: Number(row.counter),
           transports: row.transports ? (JSON.parse(row.transports as string) as string[]) : undefined,
         },
-        requireUserVerification: false,
+        requireUserVerification: true,
       });
     } catch (e) {
       throw new PasskeyError(401, `passkey not accepted: ${e instanceof Error ? e.message : String(e)}`);

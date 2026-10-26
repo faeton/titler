@@ -139,6 +139,8 @@ class download_heartbeat:
         last = _partial_bytes(self.roots)
         while not self._stop.wait(self.every):
             now = _partial_bytes(self.roots)
+            if self._stop.is_set():  # the walk can outlive __exit__'s join; never report "loading" after it
+                return
             if now != last:
                 self.progress(0.0, f"loading model (downloading, {now >> 20} MB)")
             last = now

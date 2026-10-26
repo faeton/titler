@@ -167,13 +167,14 @@ export class Auth {
 
   /** New signing secret: every link signed so far stops working (403). */
   rotateSigningKey(): LinkStats {
-    this.signingKey = randomBytes(32);
+    const next = randomBytes(32);
     tx(this.db, () => {
-      this.setKv("signing_secret", this.signingKey.toString("hex"));
+      this.setKv("signing_secret", next.toString("hex"));
       this.setKv("signing_rotated_at", now());
       this.setKv("signing_issued", "0");
       this.db.prepare("DELETE FROM settings_kv WHERE k = 'signing_last_exp'").run();
     });
+    this.signingKey = next; // only once it's stored, so memory and the DB never disagree
     return this.linkStats();
   }
 

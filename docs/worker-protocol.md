@@ -47,7 +47,11 @@ The server treats silence as a hang: no line for `TITLER_WORKER_LOAD_SILENCE_MS`
 (default 0 = off) in any other phase of a request. It sends `SIGUSR1`, logs the dump
 ("worker hang: stack dump"), kills the worker and retries the request once on a fresh
 process; a second hang fails the request ("<role> worker hung twice while …", with the
-innermost frame). `workers/smoke.py` sends `SIGUSR1` when a request is silent for
+innermost frame). A worker that prints any line during the dump wait is slow, not hung:
+it keeps running and the watchdog re-arms. Kills go to the worker's process group, so
+ffmpeg / deep-filter children die with it. A process that hangs before registering
+`faulthandler` (during imports) or isn't Python is terminated by `SIGUSR1` itself: that
+shows up as a crash, with no dump and no retry. `workers/smoke.py` sends `SIGUSR1` when a request is silent for
 `TITLER_SMOKE_TIMEOUT` s (default 900) and the dump lands in `<role>.stderr.log`.
 
 ## Ops
