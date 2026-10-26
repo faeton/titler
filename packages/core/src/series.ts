@@ -127,10 +127,16 @@ export const snapCut = (t: Ms, candidates: CutCandidate[], words: SeriesWord[], 
   return best ? best.at : safeCut(t, words);
 };
 
-/** [t0, t1) per part in source ms. Part k > 0 starts `overlapMs` before its cut. */
-export const seriesParts = (cuts: Ms[], durationMs: Ms, overlapMs = 0): { startMs: Ms; endMs: Ms }[] => {
+/**
+ * [t0, t1) per part in source ms. Part k > 0 starts `overlapMs` before its cut;
+ * `leadMs` is that repeated lead-in (cut − start, 0 for the first part).
+ */
+export const seriesParts = (cuts: Ms[], durationMs: Ms, overlapMs = 0): { startMs: Ms; endMs: Ms; leadMs: Ms }[] => {
   const bounds = [0, ...cuts, durationMs];
-  return bounds.slice(0, -1).map((b, k) => ({ startMs: k ? Math.max(0, b - overlapMs) : 0, endMs: bounds[k + 1]! }));
+  return bounds.slice(0, -1).map((b, k) => {
+    const startMs = k ? Math.max(0, b - overlapMs) : 0;
+    return { startMs, endMs: bounds[k + 1]!, leadMs: b - startMs };
+  });
 };
 
 /** Longest inter-word gap whose midpoint is inside [lo, hi]; null if no word boundary there. */
@@ -279,9 +285,14 @@ export const BADGE = {
 export const badgeText = (index: number, total: number, format: SeriesNumbering["format"]): string =>
   format === "long" ? `Часть ${index + 1} из ${total}` : `${index + 1}/${total}`;
 
-/** The «1/3» badge for part `index` (0-based), or null when numbering is off / too few parts. */
-export const seriesBadge = (numbering: SeriesNumbering, index: number, total: number, partMs: Ms): Badge | null => {
+/**
+ * The «1/3» badge for part `index` (0-based), or null when numbering is off / too few parts.
+ * `leadMs` is the part's overlap with the previous one (`seriesParts().leadMs`): the badge
+ * starts after it, where the new material begins, and keeps its full duration from there.
+ */
+export const seriesBadge = (numbering: SeriesNumbering, index: number, total: number, partMs: Ms, leadMs: Ms = 0): Badge | null => {
   if (!numbering.enabled || total < Math.max(2, numbering.minParts)) return null;
-  const end = numbering.durationMs === null ? partMs : Math.min(partMs, numbering.durationMs);
-  return { text: badgeText(index, total, numbering.format), start: 0, end };
+  const start = Math.max(0, Math.min(leadMs, partMs));
+  const end = numbering.durationMs === null ? partMs : Math.min(partMs, start + numbering.durationMs);
+  return end > start ? { text: badgeText(index, total, numbering.format), start, end } : null;
 };

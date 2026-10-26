@@ -84,7 +84,7 @@ export const useSeriesPlan = (view: ProjectView | null, doc: TranscriptDoc | nul
         : [];
     const badges: PreviewBadge[] = [];
     parts.forEach((p, i) => {
-      const b = multi ? seriesBadge(series.numbering, i, parts.length, p.endMs - p.startMs) : null;
+      const b = multi ? seriesBadge(series.numbering, i, parts.length, p.endMs - p.startMs, p.leadMs) : null;
       if (b) badges.push({ startMs: p.startMs + b.start, endMs: p.startMs + b.end, text: b.text });
     });
     return {

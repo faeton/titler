@@ -183,6 +183,17 @@ describe("numbering badge", () => {
     expect(seriesBadge({ ...n, minParts: 2, format: "long", durationMs: null }, 1, 2, 30_000)).toEqual({ text: "Часть 2 из 2", start: 0, end: 30_000 });
     expect(seriesBadge({ ...n, enabled: false }, 0, 5, 30_000)).toBeNull();
   });
+  it("starts after the overlap with the previous part", () => {
+    const parts = seriesParts([20_000, 40_000], 60_000, 500);
+    expect(parts.map((p) => p.leadMs)).toEqual([0, 500, 500]);
+    const badges = parts.map((p, i) => seriesBadge(n, i, parts.length, p.endMs - p.startMs, p.leadMs));
+    expect(badges.map((b) => [b!.start, b!.end])).toEqual([[0, 2500], [500, 3000], [500, 3000]]);
+    // in source time the badge appears exactly at the cut, where the new material begins
+    expect(parts[1]!.startMs + badges[1]!.start).toBe(20_000);
+    // whole-part numbering still runs to the end; a cut near 0 clips the lead
+    expect(seriesBadge({ ...n, durationMs: null }, 1, 3, 20_500, 500)).toMatchObject({ start: 500, end: 20_500 });
+    expect(seriesParts([300], 10_000, 500)[1]).toEqual({ startMs: 0, endMs: 10_000, leadMs: 300 });
+  });
   it("is written as a top-centred boxed ASS event", () => {
     const ass = toAss([], { width: 1080, height: 1920, style: DEFAULT_STYLE, badge: { text: "1/3", start: 0, end: 2500 } });
     expect(ass).toMatch(/^Style: Badge,Montserrat,58,.*,3,23,0,8,/m);
